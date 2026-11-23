@@ -100,19 +100,7 @@
     return JSON.parse(new TextDecoder().decode(ptBuf));
   }
 
-  function parsePairingCode(rawStr) {
-    let text = String(rawStr || '').trim();
-    if (!text) throw new Error('配对码不能为空');
-    const pairMarker = '#pair=';
-    if (text.includes(pairMarker)) {
-      text = text.split(pairMarker)[1].trim();
-    }
-    if (!text.startsWith('QZ1:')) {
-      throw new Error('无法识别的配对码（应以 QZ1: 开头）');
-    }
-    const b64u = text.slice(4).trim();
-    const jsonBytes = base64UrlToBytes(b64u);
-    const obj = JSON.parse(new TextDecoder().decode(jsonBytes));
+  function validateParsedPairPayload(obj) {
     if (!obj || obj.v !== 1 || !obj.k) {
       throw new Error('配对码内容损坏或不完整');
     }
@@ -135,6 +123,141 @@
       };
     }
     throw new Error('不支持的同步模式: ' + obj.m);
+  }
+
+  function safeDecodeURIComponent(str) {
+    try {
+      return decodeURIComponent(str);
+    } catch (_) {
+      return str;
+    }
+  }
+
+  function parsePairingCode(rawStr) {
+    let text = String(rawStr || '').trim().replace(/^['"`\s]+|['"`\s]+$/g, '');
+    if (!text) throw new Error('配对码不能为空');
+    if (text.includes('%')) {
+      text = safeDecodeURIComponent(text);
+    }
+    const compact = text.replace(/\s+/g, '');
+    const pairParam = compact.match(/[#?&]pair=([^&#]+)/i);
+    const candidate = pairParam
+      ? safeDecodeURIComponent(pairParam[1])
+      : compact;
+
+    if (/^(ghp_|github_pat_|gho_)/i.test(candidate)) {
+      throw new Error('这是 GitHub Token，请填入 16 位短配对码（形如 xxxx-xxxx-xxxx-xxxx）');
+    }
+    const qzMatch = candidate.match(/qz[1liI][:\uff1a]([A-Za-z0-9+/=_-]{20,})/i);
+    if (!qzMatch) {
+      if (/^https?:\/\//i.test(candidate)) {
+        throw new Error('这是网页地址（不含配对信息），请填入 16 位短配对码');
+      }
+      throw new Error('无法识别配对码，请输入 16 位短配对码或 QZ1: 开头配对码');
+    }
+
+    const b64u = qzMatch[1].trim();
+    let obj;
+    try {
+      const jsonBytes = base64UrlToBytes(b64u);
+      obj = JSON.parse(new TextDecoder().decode(jsonBytes));
+    } catch (_) {
+      throw new Error('QZ1 配对码不完整或识别有误，建议改输 16 位短配对码');
+    }
+    return validateParsedPairPayload(obj);
+  }
+
+  function normalizeShortPairKey(rawStr) {
+    let text = String(rawStr || '').trim().replace(/^['"`\s]+|['"`\s]+$/g, '');
+    const kParam = text.match(/[#?&]k=([^&#\s]+)/i);
+    if (kParam) {
+      text = safeDecodeURIComponent(kParam[1]);
+    }
+    return text.replace(/[\s\-_\u2013\u2014]+/g, '').toLowerCase();
+  }
+
+  function isLikelyShortPairKey(rawStr) {
+    const raw = String(rawStr || '').trim();
+    if (!raw) return false;
+    if (/[#?&]k=[^&#\s]+/i.test(raw)) return true;
+    const compact = raw.replace(/\s+/g, '');
+    if (/qz[1liI][:\uff1a]/i.test(compact)) return false;
+    if (/[#?&]pair=/i.test(compact)) return false;
+    if (/^(ghp_|github_pat_|gho_)/i.test(compact)) return false;
+    if (/^https?:\/\//i.test(compact)) return false;
+    const norm = normalizeShortPairKey(raw);
+    return /^[a-z0-9]{12,24}$/.test(norm);
+  }
+
+  async function decryptPairVaultEnvelope(vaultObj, shortKeyRaw) {
+    if (
+      !vaultObj ||
+      vaultObj.v !== 1 ||
+      vaultObj.alg !== 'PBKDF2-SHA256-AES256GCM' ||
+      !vaultObj.salt ||
+      !vaultObj.iv ||
+      !vaultObj.ct
+    ) {
+      throw new Error('云端配对配置格式不受支持');
+    }
+    const normKey = normalizeShortPairKey(shortKeyRaw);
+    if (normKey.length < 12) {
+      throw new Error('短配对码长度不足，请核对 16 位字符');
+    }
+    const subtle = getSubtleCrypto();
+    const baseKey = await subtle.importKey(
+      'raw',
+      new TextEncoder().encode(normKey),
+      'PBKDF2',
+      false,
+      ['deriveKey']
+    );
+    const derivedKey = await subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: base64ToBytes(vaultObj.salt),
+        iterations: Number(vaultObj.iter) || 600000,
+        hash: 'SHA-256',
+      },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+    let ptBuf;
+    try {
+      ptBuf = await subtle.decrypt(
+        { name: 'AES-GCM', iv: base64ToBytes(vaultObj.iv) },
+        derivedKey,
+        base64ToBytes(vaultObj.ct)
+      );
+    } catch (_) {
+      throw new Error('短配对码不正确，请核对 16 位字符');
+    }
+    const obj = JSON.parse(new TextDecoder().decode(ptBuf));
+    return validateParsedPairPayload(obj);
+  }
+
+  async function unlockPairVaultWithShortKey(
+    shortKeyRaw,
+    vaultUrl = './pair_vault.json'
+  ) {
+    const sep = vaultUrl.includes('?') ? '&' : '?';
+    let res;
+    try {
+      res = await fetch(`${vaultUrl}${sep}t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+    } catch (_) {
+      throw new Error('无法下载云端配对配置，请检查网络或先点「刷新版本」');
+    }
+    if (!res.ok) {
+      throw new Error(
+        `未找到云端配对配置 (HTTP ${res.status})，请先点「刷新版本」或稍后重试`
+      );
+    }
+    const vaultObj = await res.json();
+    return decryptPairVaultEnvelope(vaultObj, shortKeyRaw);
   }
 
   function encodePairingCode(cfg) {
@@ -281,6 +404,10 @@
     decryptSnapshot,
     parsePairingCode,
     encodePairingCode,
+    normalizeShortPairKey,
+    isLikelyShortPairKey,
+    decryptPairVaultEnvelope,
+    unlockPairVaultWithShortKey,
     isSidecarEnvironment,
     syncViaSidecar,
     syncViaCloud,

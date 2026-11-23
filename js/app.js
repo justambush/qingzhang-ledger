@@ -238,21 +238,68 @@ function doPost(e) {
   }
 
   async function applyPairingString(raw) {
-    const parsed = CryptoApi.parsePairingCode(raw);
-    await store.setMeta('sync_config', parsed);
-    state.pendingPairCode = '';
-    $('ios-pair-banner').classList.add('hidden');
-    $('pair-input-box').classList.add('hidden');
-    await runSync(false);
-    renderSettings();
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) {
+      throw new Error('请输入 16 位短配对码');
+    }
+    const applyBtn = $('btn-apply-pair');
+    const prevBtnText = applyBtn ? applyBtn.textContent : '连接';
+    if (applyBtn) {
+      applyBtn.disabled = true;
+      applyBtn.textContent = '连接中...';
+    }
+    try {
+      const parsed = CryptoApi.isLikelyShortPairKey(trimmed)
+        ? await CryptoApi.unlockPairVaultWithShortKey(trimmed)
+        : CryptoApi.parsePairingCode(trimmed);
+      await store.setMeta('sync_config', parsed);
+      state.pendingPairCode = '';
+      $('ios-pair-banner').classList.add('hidden');
+      $('pair-input-box').classList.add('hidden');
+      await runSync(false);
+      renderSettings();
+      showToast('配对成功，已连通 Jetski 云同步');
+    } finally {
+      if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = prevBtnText;
+      }
+    }
   }
 
   async function handleIncomingHashPairing() {
     const hash = window.location.hash || '';
-    const idx = hash.indexOf('pair=');
-    if (idx < 0) return;
-    const rawPair = decodeURIComponent(hash.slice(idx + 5).split('&')[0] || '');
+    const kMatch = hash.match(/(?:^|[#?&])k=([^&#]+)/i);
+    const pairMatch = hash.match(/(?:^|[#?&])pair=([^&#]+)/i);
+    if (!kMatch && !pairMatch) return;
+
     history.replaceState(null, '', window.location.pathname + window.location.search);
+
+    if (kMatch) {
+      const rawShort = decodeURIComponent(kMatch[1] || '').trim();
+      if (!rawShort) return;
+      try {
+        const parsed = await CryptoApi.unlockPairVaultWithShortKey(rawShort);
+        await store.setMeta('sync_config', parsed);
+        if (state.isIOS && !state.isStandalone) {
+          state.pendingPairCode = rawShort;
+          renderIosPairBanner();
+          await runSync(true);
+        } else {
+          state.pendingPairCode = '';
+          $('ios-pair-banner').classList.add('hidden');
+          $('pair-input-box').classList.add('hidden');
+          await runSync(false);
+          renderSettings();
+          showToast('配对成功，已连通 Jetski 云同步');
+        }
+      } catch (err) {
+        showToast(err.message || '短配对码解析失败');
+      }
+      return;
+    }
+
+    const rawPair = decodeURIComponent(pairMatch[1] || '').trim();
     if (!rawPair) return;
 
     try {
@@ -278,6 +325,10 @@ function doPost(e) {
       el.classList.add('hidden');
       return;
     }
+    const isShort = state.pendingPairCode.length <= 24;
+    const shortLine = isShort
+      ? `<br>当前短配对码：<strong>${esc(state.pendingPairCode)}</strong>`
+      : '';
     el.classList.remove('hidden');
     el.innerHTML = `
       <div class="card-head">
@@ -286,7 +337,7 @@ function doPost(e) {
       </div>
       <p class="muted-sm">
         1. 点击 Safari 底部 <strong>分享 [↑] → 添加到主屏幕</strong><br>
-        2. 点下方按钮复制配对码，从桌面打开「轻账」后粘贴配对即可。
+        2. 点下方按钮复制配对码，从桌面打开「轻账」→ <code>⚙ 设置</code> 填入即可。${shortLine}
       </p>
       <div class="btn-row">
         <button type="button" class="btn btn-primary btn-sm" id="btn-banner-copy-pair">📋 一键复制配对码</button>
@@ -1516,13 +1567,18 @@ function doPost(e) {
     } else {
       scCard.classList.remove('hidden');
       const info = state.sidecarSyncInfo || {};
+      const shortBlock = info.short_pair_key
+        ? `<div class="muted-sm mt-10">16 位短配对码：<strong>${esc(info.short_pair_key)}</strong></div>`
+        : '';
       const qrBlock = info.qr_svg
         ? `
         <div class="qr-box">
           ${info.qr_svg}
           <div class="muted-sm">用 iPhone 相机扫码打开，再「添加到主屏幕」</div>
+          ${shortBlock}
           <div class="btn-row">
-            <button type="button" class="btn btn-primary btn-sm" id="btn-copy-sc-pair">📋 复制配对码 (QZ1)</button>
+            ${info.short_pair_key ? `<button type="button" class="btn btn-primary btn-sm" id="btn-copy-sc-short">🔑 复制短配对码</button>` : ''}
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-copy-sc-pair">📋 复制 QZ1 完整码</button>
             ${info.pages_url ? `<a class="btn btn-ghost btn-sm" href="${esc(info.pages_url)}" target="_blank" rel="noopener">打开网址</a>` : ''}
           </div>
         </div>`
@@ -1553,9 +1609,13 @@ function doPost(e) {
         </details>
       `;
 
+      if ($('btn-copy-sc-short')) {
+        $('btn-copy-sc-short').onclick = () =>
+          copyText(info.short_pair_key || '', '短配对码已复制');
+      }
       if ($('btn-copy-sc-pair')) {
         $('btn-copy-sc-pair').onclick = () =>
-          copyText(info.pairing_code || '', '配对码已复制');
+          copyText(info.pairing_code || '', 'QZ1 配对码已复制');
       }
       $('btn-ask-jetski-analyze').onclick = async () => {
         const stats = StoreApi.computeMonthStats(store.snapshot, state.monthKey);
@@ -1621,7 +1681,12 @@ function doPost(e) {
     } else {
       badge.textContent = '离线本机';
       badge.className = 'badge';
-      detail.textContent = '所有记录离线存于本机；配对后可同步回 Cloudtop Jetski。';
+      detail.textContent = '所有记录离线存于本机；输入 16 位短配对码即可同步回 Cloudtop Jetski。';
+    }
+    if (!state.isSidecar) {
+      if (!cfg || !cfg.sync_key) {
+        $('pair-input-box').classList.remove('hidden');
+      }
     }
 
     // 4. Ledger Count & Tags
@@ -1891,7 +1956,11 @@ function doPost(e) {
       $('pair-input-box').classList.remove('hidden');
       try {
         const txt = await navigator.clipboard.readText();
-        if (txt && txt.includes('QZ1:')) {
+        if (
+          txt &&
+          (CryptoApi.isLikelyShortPairKey(txt) ||
+            /qz[1liI][:\uff1a]/i.test(txt))
+        ) {
           $('input-pair-code').value = txt.trim();
           await applyPairingString(txt.trim());
           return;
@@ -1905,6 +1974,30 @@ function doPost(e) {
       } catch (err) {
         showToast(err.message || '配对码无效');
       }
+    };
+    $('input-pair-code').onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        $('btn-apply-pair').click();
+      }
+    };
+    $('btn-refresh-app').onclick = async () => {
+      showToast('正在检查并刷新最新版本...');
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.update().catch(() => {})));
+        }
+        if (typeof caches !== 'undefined') {
+          const keys = await caches.keys();
+          await Promise.all(
+            keys
+              .filter((k) => k !== 'qingzhang-pwa-v4')
+              .map((k) => caches.delete(k))
+          );
+        }
+      } catch (_) {}
+      window.location.reload();
     };
     $('btn-sync-now').onclick = () => runSync(false);
     $('btn-edit-sync').onclick = () => {
@@ -2036,7 +2129,17 @@ function doPost(e) {
   async function boot() {
     await store.init();
     if (!state.isSidecar && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (hadController && !reloading) {
+          reloading = true;
+          window.location.reload();
+        }
+      });
+      navigator.serviceWorker
+        .register('./sw.js', { updateViaCache: 'none' })
+        .catch(() => {});
     }
     wireEvents();
     await handleIncomingHashPairing();

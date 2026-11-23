@@ -143,13 +143,14 @@
           </div>
           <p class="muted-sm" id="sync-detail-text">离线记账已开启，数据加密存于本机。</p>
           <div class="btn-row">
-            <button type="button" class="btn btn-primary" id="btn-paste-pair">📋 粘贴配对码</button>
+            <button type="button" class="btn btn-primary" id="btn-paste-pair">🔑 输入/粘贴配对码</button>
             <button type="button" class="btn btn-ghost" id="btn-sync-now">🔄 立即同步</button>
             <button type="button" class="btn btn-ghost" id="btn-edit-sync">手动配置</button>
+            <button type="button" class="btn btn-ghost" id="btn-refresh-app">🔄 刷新版本</button>
           </div>
           <div id="pair-input-box" class="hidden mt-10">
             <div class="inline-form">
-              <input type="text" id="input-pair-code" class="compact-input" placeholder="粘贴 QZ1:... 配对码" />
+              <input type="text" id="input-pair-code" class="compact-input" placeholder="输入 16 位短配对码 (xxxx-xxxx-xxxx-xxxx)" autocapitalize="off" autocorrect="off" spellcheck="false" />
               <button type="button" class="btn btn-primary" id="btn-apply-pair">连接</button>
             </div>
           </div>

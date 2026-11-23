@@ -1,4 +1,4 @@
-const CACHE_NAME = 'qingzhang-pwa-v3';
+const CACHE_NAME = 'qingzhang-pwa-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -35,8 +35,12 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
-  // Never intercept cross-origin sync calls (GitHub Gist / Apps Script) or API routes
-  if (url.origin !== self.location.origin || url.pathname.includes('/api/')) {
+  // Never intercept cross-origin sync calls (GitHub Gist / Apps Script), API routes, or pair_vault.json
+  if (
+    url.origin !== self.location.origin ||
+    url.pathname.includes('/api/') ||
+    url.pathname.endsWith('/pair_vault.json')
+  ) {
     return;
   }
 
