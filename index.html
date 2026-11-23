@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>轻账 · 极简记账</title>
+  <meta name="description" content="极简离线 iOS 记账 PWA，支持标签、月度分析预算、报销不入账与微信/支付宝/信用卡三单横向对账去重。" />
+  <meta name="theme-color" content="#FFFFFF" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="轻账" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="./preload.js"></script>
+  <script defer src="./js/store.js"></script>
+  <script defer src="./js/crypto_sync.js"></script>
+  <script defer src="./js/xlsx_lite.js"></script>
+  <script defer src="./js/reconcile.js"></script>
+  <script defer src="./js/app.js"></script>
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+    <!-- Top Compact Summary Header -->
+    <header class="topbar" id="topbar">
+      <div class="topbar-row">
+        <div class="month-picker">
+          <button type="button" class="icon-btn" id="btn-prev-month" aria-label="上个月">‹</button>
+          <span class="month-label" id="month-label">2026年11月</span>
+          <button type="button" class="icon-btn" id="btn-next-month" aria-label="下个月">›</button>
+        </div>
+        <div class="topbar-actions">
+          <button type="button" class="sync-pill" id="btn-sync-pill" title="同步状态">
+            <span class="sync-dot" id="sync-dot"></span>
+            <span id="sync-pill-text">离线可用</span>
+          </button>
+          <button type="button" class="sync-pill" id="btn-top-settings" title="设置与同步">⚙ 设置</button>
+        </div>
+      </div>
+
+      <div class="summary-strip" id="summary-strip">
+        <div class="sum-cell">
+          <span class="sum-k">本月支出</span>
+          <strong class="sum-v" id="sum-expense">¥0.00</strong>
+        </div>
+        <div class="sum-cell">
+          <span class="sum-k">本月收入</span>
+          <strong class="sum-v is-income" id="sum-income">¥0.00</strong>
+        </div>
+        <div class="sum-cell is-clickable" id="btn-budget-shortcut">
+          <span class="sum-k" id="sum-budget-k">预算剩余</span>
+          <strong class="sum-v" id="sum-budget-v">未设置</strong>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Scrollable Viewport -->
+    <main class="main-area" id="main-area">
+      <!-- Pairing / Install Banner (shown when #pair=... scanned in Safari before Add-to-Home-Screen) -->
+      <section class="banner-card hidden" id="ios-pair-banner"></section>
+
+      <!-- Tab 1: 明细 -->
+      <section class="tab-view" id="view-ledger">
+        <div class="filter-bar" id="ledger-filter-bar">
+          <div class="search-wrap">
+            <input type="search" id="ledger-search" class="compact-input" placeholder="搜备注 / #标签 / 金额" />
+          </div>
+          <div class="chip-scroll" id="ledger-filter-chips"></div>
+        </div>
+        <div id="ledger-list" class="ledger-list"></div>
+      </section>
+
+      <!-- Tab 2: 图表 (月度分析 + 预算 + 标签榜 + 待报销) -->
+      <section class="tab-view hidden" id="view-charts">
+        <div class="card budget-card" id="budget-card"></div>
+        <div class="card">
+          <div class="card-head">
+            <h3>每日支出</h3>
+            <span class="muted-sm" id="chart-avg-label">日均 ¥0</span>
+          </div>
+          <div id="daily-chart-wrap" class="daily-chart-wrap"></div>
+          <div id="daily-chart-tip" class="chart-tip muted-sm">点击柱子查看当天支出</div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="seg-ctrl" id="rank-mode-ctrl">
+              <button type="button" class="seg-btn active" data-rank="category">分类排行</button>
+              <button type="button" class="seg-btn" data-rank="tag">#标签排行</button>
+            </div>
+            <span class="muted-sm" id="rank-total-label"></span>
+          </div>
+          <div id="rank-list" class="rank-list"></div>
+        </div>
+        <div class="card hidden" id="reimb-pool-card"></div>
+        <div class="card hidden" id="future-plans-card"></div>
+      </section>
+
+      <!-- Tab 3: 对账台 (微信 / 支付宝 / 信用卡三单横向比对) -->
+      <section class="tab-view hidden" id="view-reconcile">
+        <div class="card upload-card">
+          <div class="upload-head">
+            <div>
+              <h3>三单横向比对</h3>
+              <p class="muted-sm">自动合并微信/支付宝+信用卡重复扣款，标出漏记与还款</p>
+            </div>
+          </div>
+          <div class="upload-actions">
+            <label class="btn btn-primary file-label" for="bill-file-input">
+              📂 上传账单 (CSV / XLSX)
+            </label>
+            <input type="file" id="bill-file-input" multiple accept=".csv,.xlsx,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+            <button type="button" class="btn btn-ghost" id="btn-demo-bills">✨ 演示三单</button>
+            <button type="button" class="btn btn-ghost hidden" id="btn-clear-bills">清空</button>
+          </div>
+          <div id="uploaded-files-chips" class="chip-scroll"></div>
+        </div>
+
+        <div class="card hidden" id="manual-map-card"></div>
+
+        <div id="reconcile-result-area" class="hidden">
+          <div class="recon-summary" id="recon-summary"></div>
+          <div class="chip-scroll recon-filters" id="recon-filter-pills"></div>
+          <div id="recon-list" class="recon-list"></div>
+          <div class="sticky-import-bar hidden" id="sticky-import-bar">
+            <button type="button" class="btn btn-primary btn-block" id="btn-import-selected">
+              一键补录选中
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 4: 设置 / 同步 / 导出 -->
+      <section class="tab-view hidden" id="view-settings">
+        <div id="pwa-install-card" class="card hidden"></div>
+        <div id="sidecar-hub-card" class="card hidden"></div>
+
+        <div class="card" id="sync-status-card">
+          <div class="card-head">
+            <h3>云端加密同步</h3>
+            <span class="badge" id="sync-mode-badge">未配对</span>
+          </div>
+          <p class="muted-sm" id="sync-detail-text">离线记账已开启，数据加密存于本机。</p>
+          <div class="btn-row">
+            <button type="button" class="btn btn-primary" id="btn-paste-pair">📋 粘贴配对码</button>
+            <button type="button" class="btn btn-ghost" id="btn-sync-now">🔄 立即同步</button>
+            <button type="button" class="btn btn-ghost" id="btn-edit-sync">手动配置</button>
+          </div>
+          <div id="pair-input-box" class="hidden mt-10">
+            <div class="inline-form">
+              <input type="text" id="input-pair-code" class="compact-input" placeholder="粘贴 QZ1:... 配对码" />
+              <button type="button" class="btn btn-primary" id="btn-apply-pair">连接</button>
+            </div>
+          </div>
+          <div id="manual-sync-form" class="hidden mt-10"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>导出与备份</h3>
+            <span class="muted-sm" id="ledger-count-label">0 条记录</span>
+          </div>
+          <div class="export-grid">
+            <button type="button" class="btn btn-ghost" id="btn-export-month-csv">📤 本月 CSV</button>
+            <button type="button" class="btn btn-ghost" id="btn-export-reimb-csv">🧾 待报销 CSV</button>
+            <button type="button" class="btn btn-ghost" id="btn-export-all-csv">📑 全部 CSV</button>
+            <button type="button" class="btn btn-ghost" id="btn-export-json">💾 JSON 备份</button>
+          </div>
+          <div class="mt-10">
+            <label class="btn btn-ghost btn-block file-label" for="json-restore-input">📥 从 JSON 备份恢复</label>
+            <input type="file" id="json-restore-input" accept=".json,application/json" hidden />
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>常用 #标签 管理</h3>
+          </div>
+          <div id="settings-tags-list" class="chip-wrap"></div>
+          <div class="inline-form mt-10">
+            <input type="text" id="input-new-tag" class="compact-input" placeholder="新增常用标签（如：出差）" maxlength="20" />
+            <button type="button" class="btn btn-primary" id="btn-add-setting-tag">添加</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Tab Bar (Shark Accounting Style) -->
+    <nav class="bottom-nav" aria-label="主导航">
+      <button type="button" class="nav-item active" data-tab="ledger">
+        <span class="nav-ico">☰</span>
+        <span class="nav-txt">明细</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="charts">
+        <span class="nav-ico">◔</span>
+        <span class="nav-txt">图表</span>
+      </button>
+      <button type="button" class="nav-add" id="btn-open-add" aria-label="记一笔">
+        <span>＋</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="reconcile">
+        <span class="nav-ico">⇄</span>
+        <span class="nav-txt">对账</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="settings">
+        <span class="nav-ico">⚙</span>
+        <span class="nav-txt">设置</span>
+      </button>
+    </nav>
+
+    <!-- Quick Entry Bottom Sheet (Shark-style Keypad + Tags + Timestamp + Reimbursement) -->
+    <div class="modal-backdrop hidden" id="entry-modal">
+      <div class="sheet entry-sheet" role="dialog" aria-modal="true" aria-label="记一笔">
+        <div class="sheet-top">
+          <div class="seg-ctrl" id="entry-type-ctrl">
+            <button type="button" class="seg-btn active" data-type="expense">支出</button>
+            <button type="button" class="seg-btn" data-type="income">收入</button>
+            <button type="button" class="seg-btn" data-type="transfer">不入账</button>
+          </div>
+          <div class="sheet-top-right">
+            <button type="button" class="btn-text danger hidden" id="btn-entry-delete-group">删整组</button>
+            <button type="button" class="btn-text danger hidden" id="btn-entry-delete">删除</button>
+            <button type="button" class="icon-btn" id="btn-close-entry" aria-label="关闭">✕</button>
+          </div>
+        </div>
+
+        <div class="cat-grid" id="entry-cat-grid"></div>
+
+        <div class="entry-tags-row">
+          <div class="chip-scroll" id="entry-tag-chips"></div>
+          <div class="inline-form mt-10 hidden" id="entry-new-tag-box">
+            <input type="text" id="entry-new-tag-input" class="compact-input" placeholder="输入标签名（如：出差）" maxlength="20" />
+            <button type="button" class="btn btn-primary btn-sm" id="btn-confirm-new-tag">确定</button>
+          </div>
+        </div>
+
+        <div class="entry-meta-bar">
+          <button type="button" class="meta-pill" id="btn-entry-reimb">
+            <span>🧾</span>
+            <span id="reimb-pill-label">报销(不入账)</span>
+          </button>
+          <button type="button" class="meta-pill" id="btn-entry-plan">
+            <span>📅</span>
+            <span id="plan-pill-label">分期/全年</span>
+          </button>
+          <label class="meta-pill time-pill">
+            <span>🕒</span>
+            <input type="datetime-local" id="entry-time-input" class="time-native-input" />
+          </label>
+          <input type="text" id="entry-note-input" class="note-input" placeholder="写点备注..." maxlength="80" />
+        </div>
+
+        <div class="plan-box hidden" id="entry-plan-edit-bar">
+          <div class="plan-box-head">
+            <span class="plan-badge" id="entry-plan-edit-label">📅 第 1/4 期</span>
+            <label class="inline-chk">
+              <input type="checkbox" id="chk-sync-plan-meta" checked />
+              <span>同步改同组分类/标签/备注</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="plan-box hidden" id="entry-plan-box">
+          <div class="plan-box-head">
+            <div class="seg-ctrl" id="plan-mode-ctrl">
+              <button type="button" class="seg-btn active" data-pmode="split">平摊总额</button>
+              <button type="button" class="seg-btn" data-pmode="repeat">每月定额</button>
+            </div>
+            <input type="number" id="plan-custom-months" class="plan-num-input" min="1" max="60" placeholder="自定月" />
+          </div>
+          <div class="chip-scroll mt-10" id="plan-period-chips">
+            <button type="button" class="chip" data-periods="1">不分期</button>
+            <button type="button" class="chip" data-periods="2">2月</button>
+            <button type="button" class="chip" data-periods="3">3月</button>
+            <button type="button" class="chip" data-periods="4">4月</button>
+            <button type="button" class="chip" data-periods="6">6月</button>
+            <button type="button" class="chip" data-periods="12">12月(全年)</button>
+          </div>
+          <div class="muted-sm mt-10" id="plan-preview-text"></div>
+        </div>
+
+        <div class="keypad-wrap">
+          <div class="amount-display">
+            <span class="amount-expr" id="calc-expr"></span>
+            <span class="amount-val" id="calc-display">¥0.00</span>
+          </div>
+          <div class="keypad-grid" id="keypad-grid">
+            <button type="button" class="kp-btn" data-kp="7">7</button>
+            <button type="button" class="kp-btn" data-kp="8">8</button>
+            <button type="button" class="kp-btn" data-kp="9">9</button>
+            <button type="button" class="kp-btn kp-fn" data-kp="del">⌫</button>
+            <button type="button" class="kp-btn" data-kp="4">4</button>
+            <button type="button" class="kp-btn" data-kp="5">5</button>
+            <button type="button" class="kp-btn" data-kp="6">6</button>
+            <button type="button" class="kp-btn kp-fn" data-kp="+">＋</button>
+            <button type="button" class="kp-btn" data-kp="1">1</button>
+            <button type="button" class="kp-btn" data-kp="2">2</button>
+            <button type="button" class="kp-btn" data-kp="3">3</button>
+            <button type="button" class="kp-btn kp-fn" data-kp="-">－</button>
+            <button type="button" class="kp-btn" data-kp=".">.</button>
+            <button type="button" class="kp-btn" data-kp="0">0</button>
+            <button type="button" class="kp-btn kp-fn" data-kp="=">=</button>
+            <button type="button" class="kp-btn kp-done" data-kp="done">完成</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Budget Modal -->
+    <div class="modal-backdrop hidden" id="budget-modal">
+      <div class="sheet dialog-sheet" role="dialog" aria-modal="true" aria-label="设置预算">
+        <div class="sheet-top">
+          <h3 id="budget-modal-title">设置月度预算</h3>
+          <button type="button" class="icon-btn" id="btn-close-budget">✕</button>
+        </div>
+        <div class="budget-form" id="budget-form-body"></div>
+      </div>
+    </div>
+
+    <!-- iOS Install Guide Modal -->
+    <div class="modal-backdrop hidden" id="ios-guide-modal">
+      <div class="sheet dialog-sheet" role="dialog" aria-modal="true" aria-label="添加到 iPhone 主屏幕">
+        <div class="sheet-top">
+          <h3>添加到 iPhone 主屏幕</h3>
+          <button type="button" class="icon-btn" id="btn-close-ios-guide">✕</button>
+        </div>
+        <ol class="guide-steps">
+          <li>在 Safari 底部点击 <strong>分享按钮 [↑]</strong></li>
+          <li>向下滑动并点击 <strong>「添加到主屏幕」</strong></li>
+          <li>若要连通 Jetski：先点击下方 <strong>复制配对码</strong>，再从桌面打开「轻账」点「粘贴配对码」即可。</li>
+        </ol>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary hidden" id="btn-modal-copy-pair">📋 复制配对码</button>
+          <button type="button" class="btn btn-ghost" id="btn-dismiss-ios-guide">知道了</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+  </div>
+</body>
+</html>

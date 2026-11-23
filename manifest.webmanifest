@@ -1,0 +1,32 @@
+{
+  "id": "./",
+  "name": "轻账 · 极简离线记账与三单对账",
+  "short_name": "轻账",
+  "description": "简单直观的 iOS 离线记账 PWA，支持微信/支付宝/信用卡横向对账去重、报销不入账与 Jetski 端到端加密同步。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#FFFFFF",
+  "background_color": "#F7F8FA",
+  "icons": [
+    {
+      "src": "./icons/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
