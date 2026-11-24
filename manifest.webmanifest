@@ -28,5 +28,21 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "记一笔",
+      "short_name": "记一笔",
+      "description": "秒开轻账计算器记一笔",
+      "url": "./?action=add#add",
+      "icons": [{ "src": "./icons/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "本月图表",
+      "short_name": "图表",
+      "description": "查看本月支出与预算",
+      "url": "./?action=charts#charts",
+      "icons": [{ "src": "./icons/pwa-192x192.png", "sizes": "192x192", "type": "image/png" }]
+    }
   ]
 }

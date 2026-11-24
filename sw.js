@@ -1,4 +1,4 @@
-const CACHE_NAME = 'qingzhang-pwa-v6';
+const CACHE_NAME = 'qingzhang-pwa-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const ASSETS = [
   './preload.js',
   './js/store.js',
   './js/crypto_sync.js',
+  './js/ios_widget.js',
   './js/xlsx_lite.js',
   './js/reconcile.js',
   './js/app.js',

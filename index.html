@@ -18,6 +18,7 @@
   <script src="./preload.js"></script>
   <script defer src="./js/store.js"></script>
   <script defer src="./js/crypto_sync.js"></script>
+  <script defer src="./js/ios_widget.js"></script>
   <script defer src="./js/xlsx_lite.js"></script>
   <script defer src="./js/reconcile.js"></script>
   <script defer src="./js/app.js"></script>
@@ -156,6 +157,25 @@
             </div>
           </div>
           <div id="manual-sync-form" class="sub-panel hidden mt-10"></div>
+        </div>
+
+        <div class="card" id="ios-widget-card">
+          <div class="card-head">
+            <h3>🧩 iPhone 左滑负一屏 / 桌面小组件</h3>
+            <span class="badge ok">免签永久</span>
+          </div>
+          <p class="muted-sm">支持实时支出预算看板（Scriptable）与系统自带「快捷指令」负一屏一键记账。</p>
+          <div class="btn-row">
+            <button type="button" class="btn btn-primary" id="btn-copy-widget-script">📋 复制实时看板组件代码</button>
+            <button type="button" class="btn btn-ghost" id="btn-copy-quick-add-url">⚡ 复制秒开记一笔链接</button>
+          </div>
+          <details class="settings-details mt-10">
+            <summary class="muted-sm" style="cursor:pointer;font-weight:600">📖 查看添加到 iPhone 主页左滑（负一屏）步骤</summary>
+            <ol class="guide-steps mt-10" style="margin-bottom:0">
+              <li><strong>实时数据看板（推荐中号）</strong>：App Store 免费安装 <strong>Scriptable</strong> → 点右上角 <code>＋</code> 粘贴上方复制的代码并改名「轻账」→ 到 iPhone 主页<strong>左滑负一屏</strong>点「编辑 → ＋」搜 Scriptable 添加 → 长按组件选 Script 为「轻账」即可实时显示本月支出、预算进度条与今日消费（断网也可读缓存）。</li>
+              <li><strong>免装 App 系统快捷指令</strong>：打开 iOS 自带「快捷指令」→ <code>＋</code> 添加操作搜 <strong>「打开 App」</strong> 选「轻账」（或搜「打开 URL」粘贴上方秒开链接）→ 到负一屏添加「快捷指令」小组件，点一下直接记账！</li>
+            </ol>
+          </details>
         </div>
 
         <div class="card">

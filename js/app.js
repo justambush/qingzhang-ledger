@@ -4,6 +4,7 @@
   const StoreApi = window.QZStore;
   const CryptoApi = window.QZCrypto;
   const ReconApi = window.QZReconcile;
+  const WidgetApi = window.QZWidget;
 
   const store = new StoreApi.LedgerStore();
 
@@ -370,6 +371,69 @@ function doPost(e) {
     $('btn-banner-copy-pair').onclick = async () => {
       await copyText(state.pendingPairCode, '配对码已复制，请从主屏幕打开轻账后粘贴');
     };
+  }
+
+  async function handleIncomingQuickAction() {
+    const searchParams = new URLSearchParams(window.location.search || '');
+    const rawHash = (window.location.hash || '').replace(/^#/, '');
+    const hashBase = rawHash.split('?')[0].toLowerCase();
+    const hashQuery = rawHash.includes('?') ? rawHash.split('?')[1] : '';
+    const hashParams = new URLSearchParams(hashQuery);
+
+    const action = (
+      searchParams.get('action') ||
+      hashParams.get('action') ||
+      (hashBase === 'add' ? 'add' : hashBase === 'charts' ? 'charts' : '')
+    ).toLowerCase();
+
+    if (!action) return;
+
+    const amt = searchParams.get('amt') || hashParams.get('amt') || '';
+    const cat = searchParams.get('cat') || hashParams.get('cat') || '';
+    const sub = searchParams.get('sub') || hashParams.get('sub') || '';
+    const note = searchParams.get('note') || hashParams.get('note') || '';
+    const autoSave =
+      (searchParams.get('auto') || hashParams.get('auto') || '') === '1';
+
+    // Clean query/hash without losing sidecar token if present
+    searchParams.delete('action');
+    searchParams.delete('amt');
+    searchParams.delete('cat');
+    searchParams.delete('sub');
+    searchParams.delete('note');
+    searchParams.delete('auto');
+    const remQs = searchParams.toString();
+    history.replaceState(
+      null,
+      '',
+      window.location.pathname + (remQs ? '?' + remQs : '')
+    );
+
+    if (action === 'charts') {
+      switchTab('charts');
+      return;
+    }
+
+    if (action === 'add') {
+      openEntryModal(null);
+      if (cat && StoreApi.CATEGORY_MAP[cat]) {
+        state.entryCategory = cat;
+      }
+      if (sub) {
+        const cleanSub = sub.trim().replace(/^#+/, '').slice(0, 24);
+        if (cleanSub) state.entryTags = [cleanSub];
+      }
+      if (amt && Number.isFinite(Number(amt)) && Number(amt) > 0) {
+        state.calcExpr = String(Math.round(Math.abs(Number(amt)) * 100) / 100);
+      }
+      if (note) {
+        $('entry-note-input').value = note.slice(0, 80);
+      }
+      renderEntrySheet();
+      if (autoSave && evalCalcExpression(state.calcExpr) > 0) {
+        await handleKeypadPress('done');
+      }
+    }
   }
 
   async function copyText(text, okMsg = '已复制到剪贴板') {
@@ -2223,7 +2287,70 @@ function doPost(e) {
       }
     };
 
+    if ($('btn-copy-widget-script')) {
+      $('btn-copy-widget-script').onclick = async () => {
+        try {
+          if (!WidgetApi || typeof WidgetApi.generateScriptableWidgetCode !== 'function') {
+            showToast('小组件脚本模块未加载');
+            return;
+          }
+          if (state.isSidecar) {
+            const res = await window.sidecar.fetch('/api/widget/script', {
+              method: 'POST',
+              body: '{}',
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '生成失败');
+            const code = WidgetApi.generateScriptableWidgetCode({
+              gistId: data.gist_id,
+              syncKey: data.sync_key,
+              token: data.token,
+              appUrl:
+                data.pages_url ||
+                'https://justambush.github.io/qingzhang-ledger/',
+            });
+            await copyText(code, '已复制 Scriptable 小组件代码，请去 iPhone Scriptable 粘贴');
+            return;
+          }
+          const cfg = store.meta.sync_config;
+          if (!cfg || cfg.mode !== 'gist' || !cfg.gist_id || !cfg.token || !cfg.sync_key) {
+            $('pair-input-box').classList.remove('hidden');
+            $('input-pair-code').focus();
+            showToast('请先在上方完成 16 位短配对码连接后再生成组件代码');
+            return;
+          }
+          const appUrl = window.location.origin + window.location.pathname;
+          const code = WidgetApi.generateScriptableWidgetCode({
+            gistId: cfg.gist_id,
+            syncKey: cfg.sync_key,
+            token: cfg.token,
+            appUrl,
+          });
+          await copyText(code, '已复制小组件代码，请打开 Scriptable 粘贴');
+        } catch (err) {
+          showToast(err.message || '生成小组件代码失败');
+        }
+      };
+    }
+
+    if ($('btn-copy-quick-add-url')) {
+      $('btn-copy-quick-add-url').onclick = async () => {
+        const base =
+          state.isSidecar && state.sidecarSyncInfo && state.sidecarSyncInfo.pages_url
+            ? state.sidecarSyncInfo.pages_url
+            : window.location.origin + window.location.pathname;
+        const cleanBase = base.split('#')[0].split('?')[0];
+        await copyText(
+          cleanBase + '?action=add#add',
+          '已复制秒开记一笔链接，可粘贴到 iOS 快捷指令'
+        );
+      };
+    }
+
     // PWA Install Events & Connectivity Listeners
+    window.addEventListener('hashchange', () => {
+      handleIncomingQuickAction();
+    });
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       state.deferredInstallPrompt = e;
@@ -2263,6 +2390,7 @@ function doPost(e) {
     await handleIncomingHashPairing();
     await refreshSidecarMeta();
     renderAll();
+    await handleIncomingQuickAction();
     runSync(true);
   }
 
