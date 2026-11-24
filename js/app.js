@@ -44,6 +44,7 @@
 
     // Runtime env
     settingsSubcatKey: 'sport',
+    newSubtagOpen: false,
     isSidecar: CryptoApi.isSidecarEnvironment(),
     sidecarSyncInfo: null,
     deferredInstallPrompt: null,
@@ -52,7 +53,12 @@
       window.matchMedia('(display-mode: standalone)').matches ||
       navigator.standalone === true,
     pendingPairCode: '',
+    openedFromWidget: false,
     syncing: false,
+    syncPromise: null,
+    syncQueued: false,
+    syncQueuedLoud: false,
+    lastAutoSyncMs: 0,
   };
 
   const APPS_SCRIPT_SNIPPET = `function doGet(e) {
@@ -194,39 +200,73 @@ function doPost(e) {
   }
 
   async function runSync(silent = true) {
-    if (state.syncing) return;
+    if (state.syncing && state.syncPromise) {
+      state.syncQueued = true;
+      if (!silent) state.syncQueuedLoud = true;
+      return state.syncPromise;
+    }
     const cfg = store.meta.sync_config;
     if (!state.isSidecar && (!cfg || !cfg.sync_key)) {
       updateSyncPill();
-      return;
+      return { ok: false, reason: 'not_configured' };
     }
     if (!navigator.onLine && !state.isSidecar) {
       updateSyncPill();
-      return;
+      return { ok: false, reason: 'offline' };
     }
+
     state.syncing = true;
     updateSyncPill();
-    try {
-      if (state.isSidecar) {
-        await CryptoApi.syncViaSidecar(store);
-        const res = await window.sidecar.fetch('/api/sync/now', {
-          method: 'POST',
-          body: '{}',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.snapshot) await store.replaceFromMerge(data.snapshot);
-          if (data.sync) state.sidecarSyncInfo = data.sync;
+    const p = (async () => {
+      let lastRes = { ok: false };
+      let nextSilent = silent;
+      for (let pass = 0; pass < 2; pass++) {
+        state.syncQueued = false;
+        let hadError = false;
+        try {
+          if (state.isSidecar) {
+            lastRes = await CryptoApi.syncViaSidecar(store);
+            const res = await window.sidecar.fetch('/api/sync/now', {
+              method: 'POST',
+              body: '{}',
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.snapshot) await store.replaceFromMerge(data.snapshot);
+              if (data.sync) state.sidecarSyncInfo = data.sync;
+            }
+            if (!nextSilent) showToast('已同步 Jetski 账本');
+          } else {
+            lastRes = await CryptoApi.syncViaCloud(store, store.meta.sync_config);
+            if (lastRes.ok && !nextSilent) showToast('云端加密同步完成');
+          }
+        } catch (err) {
+          hadError = true;
+          lastRes = { ok: false, error: err && err.message };
+          if (!nextSilent) {
+            showToast((err && err.message) || '同步失败，已保留离线记录');
+          }
         }
-        if (!silent) showToast('已同步 Jetski 账本');
-      } else {
-        const res = await CryptoApi.syncViaCloud(store, cfg);
-        if (res.ok && !silent) showToast('云端加密同步完成');
+        const stillNeedsSync =
+          !hadError &&
+          (state.syncQueued || Boolean(store.meta.dirty)) &&
+          (navigator.onLine || state.isSidecar);
+        if (!stillNeedsSync) break;
+        nextSilent = !state.syncQueuedLoud;
+        state.syncQueuedLoud = false;
       }
-    } catch (err) {
-      if (!silent) showToast(err.message || '同步失败，已保留离线记录');
+      state.syncQueued = false;
+      state.syncQueuedLoud = false;
+      state.lastAutoSyncMs = Date.now();
+      return lastRes;
+    })();
+
+    state.syncPromise = p;
+    try {
+      return await p;
     } finally {
       state.syncing = false;
+      state.syncPromise = null;
       renderAll();
     }
   }
@@ -297,6 +337,15 @@ function doPost(e) {
     const pairMatch = hash.match(/(?:^|[#?&])pair=([^&#]+)/i);
     if (!kMatch && !pairMatch) return;
 
+    const searchParams = new URLSearchParams(window.location.search || '');
+    const rawHash = hash.replace(/^#/, '');
+    const hashBase = rawHash.split('?')[0].toLowerCase();
+    const hasQuickAction =
+      Boolean(searchParams.get('action')) ||
+      /[#?&]action=/i.test(hash) ||
+      hashBase === 'add' ||
+      hashBase === 'charts';
+
     history.replaceState(null, '', window.location.pathname + window.location.search);
 
     if (kMatch) {
@@ -305,7 +354,12 @@ function doPost(e) {
       try {
         const parsed = await CryptoApi.unlockPairVaultWithShortKey(rawShort);
         await store.setMeta('sync_config', parsed);
-        if (state.isIOS && !state.isStandalone) {
+        if (hasQuickAction) {
+          state.openedFromWidget = true;
+          state.pendingPairCode = '';
+          $('ios-pair-banner').classList.add('hidden');
+          $('pair-input-box').classList.add('hidden');
+        } else if (state.isIOS && !state.isStandalone) {
           state.pendingPairCode = rawShort;
           renderIosPairBanner();
           await runSync(true);
@@ -329,7 +383,13 @@ function doPost(e) {
     try {
       const parsed = CryptoApi.parsePairingCode(rawPair);
       const code = CryptoApi.encodePairingCode(parsed);
-      if (state.isIOS && !state.isStandalone) {
+      if (hasQuickAction) {
+        state.openedFromWidget = true;
+        state.pendingPairCode = '';
+        await store.setMeta('sync_config', parsed);
+        $('ios-pair-banner').classList.add('hidden');
+        $('pair-input-box').classList.add('hidden');
+      } else if (state.isIOS && !state.isStandalone) {
         // On iOS, Safari browser storage is isolated from Home Screen PWA storage!
         state.pendingPairCode = code;
         await store.setMeta('sync_config', parsed);
@@ -386,7 +446,7 @@ function doPost(e) {
       (hashBase === 'add' ? 'add' : hashBase === 'charts' ? 'charts' : '')
     ).toLowerCase();
 
-    if (!action) return;
+    if (!action) return false;
 
     const amt = searchParams.get('amt') || hashParams.get('amt') || '';
     const cat = searchParams.get('cat') || hashParams.get('cat') || '';
@@ -411,10 +471,13 @@ function doPost(e) {
 
     if (action === 'charts') {
       switchTab('charts');
-      return;
+      return true;
     }
 
     if (action === 'add') {
+      if (!state.isStandalone && !state.isSidecar) {
+        state.openedFromWidget = true;
+      }
       openEntryModal(null);
       if (cat && StoreApi.CATEGORY_MAP[cat]) {
         state.entryCategory = cat;
@@ -430,10 +493,16 @@ function doPost(e) {
         $('entry-note-input').value = note.slice(0, 80);
       }
       renderEntrySheet();
+      const cfg = store.meta.sync_config;
+      if (!state.isStandalone && !state.isSidecar && (!cfg || !cfg.sync_key)) {
+        showToast('提示：当前浏览器未配对云端，请重新复制一次小组件代码或粘贴配对码');
+      }
       if (autoSave && evalCalcExpression(state.calcExpr) > 0) {
         await handleKeypadPress('done');
       }
+      return true;
     }
+    return false;
   }
 
   async function copyText(text, okMsg = '已复制到剪贴板') {
@@ -888,8 +957,21 @@ function doPost(e) {
   // Quick Entry Sheet & Calculator Keypad
   // -------------------------------------------------------------------------
 
+  function getCategorySubtags(catKey) {
+    if (typeof store.getSubtagsForCategory === 'function') {
+      return store.getSubtagsForCategory(catKey);
+    }
+    return (
+      (StoreApi.DEFAULT_CATEGORY_SUBTAGS &&
+        StoreApi.DEFAULT_CATEGORY_SUBTAGS[catKey]) ||
+      []
+    );
+  }
+
   function openEntryModal(editId = null) {
     state.entryEditingId = editId;
+    state.newSubtagOpen = false;
+    if ($('entry-new-tag-input')) $('entry-new-tag-input').value = '';
     const delBtn = $('btn-entry-delete');
     const delGroupBtn = $('btn-entry-delete-group');
     const editBar = $('entry-plan-edit-bar');
@@ -1012,66 +1094,28 @@ function doPost(e) {
       )
       .join('');
 
-    $('entry-cat-grid')
-      .querySelectorAll('.cat-btn')
-      .forEach((btn) => {
-        btn.onclick = () => {
-          const nextCat = btn.getAttribute('data-cat');
-          if (!state.entryEditingId && nextCat !== state.entryCategory) {
-            const prevAllowed = store.getSubtagsForCategory(state.entryCategory);
-            const nextAllowed = store.getSubtagsForCategory(nextCat);
-            state.entryTags = state.entryTags.filter(
-              (t) => nextAllowed.includes(t) || !prevAllowed.includes(t)
-            );
-          }
-          state.entryCategory = nextCat;
-          renderEntrySheet();
-        };
-      });
-
-    // Level-2 subcategory tags scoped to selected primary category
+    // Level-2 subcategory tags scoped to selected primary category (delegated handler in wireEvents)
     const catMeta = StoreApi.CATEGORY_MAP[state.entryCategory] || { label: '' };
     const allTags = Array.from(
       new Set([
-        ...store.getSubtagsForCategory(state.entryCategory),
+        ...getCategorySubtags(state.entryCategory),
         ...state.entryTags,
       ])
     );
     $('entry-tag-chips').innerHTML =
-      '<span class="subcat-hint">二级</span>' +
       allTags
         .map(
           (tg) =>
             `<button type="button" class="chip ${state.entryTags.includes(tg) ? 'active' : ''}" data-entry-tag="${esc(tg)}">${esc(tg)}</button>`
         )
         .join('') +
-      '<button type="button" class="chip chip-dashed" id="btn-entry-new-tag">＋ 二级</button>';
+      `<button type="button" class="chip chip-dashed ${state.newSubtagOpen ? 'active' : ''}" id="btn-entry-new-tag" data-action="toggle-new-subtag">＋ 二级分类</button>`;
     if ($('entry-new-tag-input')) {
       $('entry-new-tag-input').placeholder = `添加「${catMeta.label}」二级分类...`;
     }
-
-    $('entry-tag-chips')
-      .querySelectorAll('[data-entry-tag]')
-      .forEach((btn) => {
-        btn.onclick = () => {
-          const tg = btn.getAttribute('data-entry-tag');
-          if (state.entryTags.includes(tg)) {
-            state.entryTags = state.entryTags.filter((x) => x !== tg);
-          } else {
-            state.entryTags.push(tg);
-          }
-          renderEntrySheet();
-        };
-      });
-
-    $('btn-entry-new-tag').onclick = () => {
-      const box = $('entry-new-tag-box');
-      box.classList.toggle('hidden');
-      if (!box.classList.contains('hidden')) {
-        $('entry-new-tag-input').value = '';
-        $('entry-new-tag-input').focus();
-      }
-    };
+    if ($('entry-new-tag-box')) {
+      $('entry-new-tag-box').classList.toggle('hidden', !state.newSubtagOpen);
+    }
 
     const reimbBtn = $('btn-entry-reimb');
     reimbBtn.classList.toggle('active', state.entryReimbursable);
@@ -1180,12 +1224,26 @@ function doPost(e) {
         closeModal('entry-modal');
         state.monthKey = occurredAt.slice(0, 7);
         renderAll();
-        showToast(
+        const planMsg =
           state.planMode === 'split'
             ? `已按 ${state.planPeriods} 个月平摊入账`
-            : `已一键生成 ${state.planPeriods} 期固定账目`
-        );
-        runSync(true);
+            : `已一键生成 ${state.planPeriods} 期固定账目`;
+        const syncP = runSync(true);
+        if (
+          !state.isStandalone &&
+          !state.isSidecar &&
+          store.meta.sync_config &&
+          store.meta.sync_config.sync_key
+        ) {
+          showToast(`${planMsg}，正在同步云端...`);
+          syncP.then((r) => {
+            if (r && r.ok && !store.meta.dirty) {
+              showToast(`${planMsg}，已同步云端 ✓`);
+            }
+          });
+        } else {
+          showToast(planMsg);
+        }
         return;
       }
 
@@ -1228,8 +1286,23 @@ function doPost(e) {
       closeModal('entry-modal');
       state.monthKey = occurredAt.slice(0, 7);
       renderAll();
-      showToast(state.entryEditingId ? '已更新记录' : '已记一笔');
-      runSync(true);
+      const baseMsg = state.entryEditingId ? '已更新记录' : '已记一笔';
+      const syncP = runSync(true);
+      if (
+        !state.isStandalone &&
+        !state.isSidecar &&
+        store.meta.sync_config &&
+        store.meta.sync_config.sync_key
+      ) {
+        showToast(`${baseMsg}，正在同步云端...`);
+        syncP.then((r) => {
+          if (r && r.ok && !store.meta.dirty) {
+            showToast(`${baseMsg}并同步云端 ✓`);
+          }
+        });
+      } else {
+        showToast(baseMsg);
+      }
       return;
     }
 
@@ -1827,16 +1900,8 @@ function doPost(e) {
           `<button type="button" class="chip ${c.key === state.settingsSubcatKey ? 'active' : ''}" data-sc-cat="${esc(c.key)}">${esc(c.icon)} ${esc(c.label)}</button>`
       )
       .join('');
-    $('settings-subcat-cats')
-      .querySelectorAll('[data-sc-cat]')
-      .forEach((btn) => {
-        btn.onclick = () => {
-          state.settingsSubcatKey = btn.getAttribute('data-sc-cat');
-          renderSettings();
-        };
-      });
 
-    const subtags = store.getSubtagsForCategory(state.settingsSubcatKey);
+    const subtags = getCategorySubtags(state.settingsSubcatKey);
     $('settings-tags-list').innerHTML =
       subtags.length > 0
         ? subtags
@@ -1846,17 +1911,6 @@ function doPost(e) {
             )
             .join('')
         : `<span class="muted-sm">「${esc(selCatMeta.label)}」暂无二级分类，请在下方添加</span>`;
-    $('settings-tags-list')
-      .querySelectorAll('[data-del-subtag]')
-      .forEach((btn) => {
-        btn.onclick = async () => {
-          const tg = btn.getAttribute('data-del-subtag');
-          await store.removeSubtag(state.settingsSubcatKey, tg);
-          renderSettings();
-          showToast(`已移除「${tg}」`);
-          runSync(true);
-        };
-      });
     $('input-new-tag').placeholder = `新增「${selCatMeta.label}」二级分类（如：${selCatMeta.key === 'sport' ? '私教' : selCatMeta.key === 'daily' ? '纸巾' : '自定义'}）`;
   }
 
@@ -1934,17 +1988,61 @@ function doPost(e) {
       renderAll();
     };
 
-    $('rank-mode-ctrl')
-      .querySelectorAll('.seg-btn')
-      .forEach((btn) => {
-        btn.onclick = () => {
-          state.rankMode = btn.getAttribute('data-rank');
-          $('rank-mode-ctrl')
-            .querySelectorAll('.seg-btn')
-            .forEach((b) => b.classList.toggle('active', b === btn));
-          renderAll();
-        };
-      });
+    $('rank-mode-ctrl').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-rank]');
+      if (!btn) return;
+      state.rankMode = btn.getAttribute('data-rank');
+      $('rank-mode-ctrl')
+        .querySelectorAll('.seg-btn')
+        .forEach((b) => b.classList.toggle('active', b === btn));
+      renderAll();
+    });
+
+    // Quick Entry Modal (delegated handlers prevent stale/missed clicks on re-render)
+    $('entry-cat-grid').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-cat]');
+      if (!btn) return;
+      const nextCat = btn.getAttribute('data-cat');
+      if (!state.entryEditingId && nextCat !== state.entryCategory) {
+        const prevAllowed = getCategorySubtags(state.entryCategory);
+        const nextAllowed = getCategorySubtags(nextCat);
+        state.entryTags = state.entryTags.filter(
+          (t) => nextAllowed.includes(t) || !prevAllowed.includes(t)
+        );
+      }
+      state.entryCategory = nextCat;
+      state.newSubtagOpen = false;
+      renderEntrySheet();
+    });
+
+    $('entry-tag-chips').addEventListener('click', (e) => {
+      const addBtn = e.target.closest('[data-action="toggle-new-subtag"]');
+      if (addBtn) {
+        state.newSubtagOpen = !state.newSubtagOpen;
+        renderEntrySheet();
+        if (state.newSubtagOpen && typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => {
+            const inp = $('entry-new-tag-input');
+            const box = $('entry-new-tag-box');
+            if (box && box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
+            if (inp) {
+              inp.value = '';
+              inp.focus();
+            }
+          });
+        }
+        return;
+      }
+      const tagBtn = e.target.closest('[data-entry-tag]');
+      if (!tagBtn) return;
+      const tg = tagBtn.getAttribute('data-entry-tag');
+      if (state.entryTags.includes(tg)) {
+        state.entryTags = state.entryTags.filter((x) => x !== tg);
+      } else {
+        state.entryTags.push(tg);
+      }
+      renderEntrySheet();
+    });
 
     // Quick Entry Modal
     $('btn-open-add').onclick = () => openEntryModal(null);
@@ -2029,12 +2127,25 @@ function doPost(e) {
         .replace(/::/g, '·')
         .slice(0, 20);
       if (val) {
-        await store.addSubtag(state.entryCategory, val);
+        if (typeof store.addSubtag === 'function') {
+          await store.addSubtag(state.entryCategory, val);
+        } else {
+          await store.addTag(`${state.entryCategory}::${val}`);
+        }
         if (!state.entryTags.includes(val)) state.entryTags.push(val);
       }
-      $('entry-new-tag-box').classList.add('hidden');
+      state.newSubtagOpen = false;
+      $('entry-new-tag-input').value = '';
       renderEntrySheet();
+      if (val) runSync(true);
     };
+    if ($('btn-cancel-new-tag')) {
+      $('btn-cancel-new-tag').onclick = () => {
+        state.newSubtagOpen = false;
+        $('entry-new-tag-input').value = '';
+        renderEntrySheet();
+      };
+    }
     $('entry-new-tag-input').onkeydown = (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -2268,6 +2379,25 @@ function doPost(e) {
       }
     };
 
+    $('settings-subcat-cats').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-sc-cat]');
+      if (!btn) return;
+      state.settingsSubcatKey = btn.getAttribute('data-sc-cat');
+      renderSettings();
+    });
+
+    $('settings-tags-list').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-del-subtag]');
+      if (!btn) return;
+      const tg = btn.getAttribute('data-del-subtag');
+      if (typeof store.removeSubtag === 'function') {
+        await store.removeSubtag(state.settingsSubcatKey, tg);
+      }
+      renderSettings();
+      showToast(`已移除「${tg}」`);
+      runSync(true);
+    });
+
     $('btn-add-setting-tag').onclick = async () => {
       const val = $('input-new-tag').value
         .trim()
@@ -2275,7 +2405,11 @@ function doPost(e) {
         .replace(/::/g, '·')
         .slice(0, 20);
       if (!val) return;
-      await store.addSubtag(state.settingsSubcatKey, val);
+      if (typeof store.addSubtag === 'function') {
+        await store.addSubtag(state.settingsSubcatKey, val);
+      } else {
+        await store.addTag(`${state.settingsSubcatKey}::${val}`);
+      }
       $('input-new-tag').value = '';
       renderSettings();
       runSync(true);
@@ -2340,16 +2474,35 @@ function doPost(e) {
             ? state.sidecarSyncInfo.pages_url
             : window.location.origin + window.location.pathname;
         const cleanBase = base.split('#')[0].split('?')[0];
+        let pcode = '';
+        if (state.isSidecar && state.sidecarSyncInfo && state.sidecarSyncInfo.pairing_code) {
+          pcode = state.sidecarSyncInfo.pairing_code;
+        } else if (store.meta.sync_config && store.meta.sync_config.sync_key) {
+          pcode = CryptoApi.encodePairingCode(store.meta.sync_config);
+        }
+        const quickUrl = pcode
+          ? `${cleanBase}?action=add#pair=${pcode}`
+          : `${cleanBase}?action=add#add`;
         await copyText(
-          cleanBase + '?action=add#add',
-          '已复制秒开记一笔链接，可粘贴到 iOS 快捷指令'
+          quickUrl,
+          pcode
+            ? '已复制免配对秒开记一笔链接，可粘贴到 iOS 快捷指令'
+            : '已复制秒开记一笔链接，可粘贴到 iOS 快捷指令'
         );
       };
     }
 
-    // PWA Install Events & Connectivity Listeners
-    window.addEventListener('hashchange', () => {
-      handleIncomingQuickAction();
+    const triggerResumeSync = () => {
+      if (store.meta.dirty || Date.now() - state.lastAutoSyncMs > 1500) {
+        runSync(true);
+      }
+    };
+
+    // PWA Install Events & Connectivity / Resume Sync Listeners
+    window.addEventListener('hashchange', async () => {
+      await handleIncomingHashPairing();
+      const handled = await handleIncomingQuickAction();
+      if (handled) runSync(true);
     });
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
@@ -2367,8 +2520,10 @@ function doPost(e) {
     });
     window.addEventListener('offline', () => updateSyncPill());
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') runSync(true);
+      if (document.visibilityState === 'visible') triggerResumeSync();
     });
+    window.addEventListener('focus', triggerResumeSync);
+    window.addEventListener('pageshow', triggerResumeSync);
   }
 
   async function boot() {

@@ -44,6 +44,64 @@
     return b64ToBytes(s + pad);
   }
 
+  function utf8Encode(str) {
+    const s = String(str ?? '');
+    const out = [];
+    for (let i = 0; i < s.length; i++) {
+      let cp = s.charCodeAt(i);
+      if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < s.length) {
+        const lo = s.charCodeAt(i + 1);
+        if (lo >= 0xdc00 && lo <= 0xdfff) {
+          cp = 0x10000 + ((cp - 0xd800) << 10) + (lo - 0xdc00);
+          i += 1;
+        }
+      }
+      if (cp < 0x80) {
+        out.push(cp);
+      } else if (cp < 0x800) {
+        out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+      } else if (cp < 0x10000) {
+        out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+      } else {
+        out.push(
+          0xf0 | (cp >> 18),
+          0x80 | ((cp >> 12) & 0x3f),
+          0x80 | ((cp >> 6) & 0x3f),
+          0x80 | (cp & 0x3f)
+        );
+      }
+    }
+    return new Uint8Array(out);
+  }
+
+  function bytesToB64Url(bytes) {
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const b0 = bytes[i];
+      const has1 = i + 1 < bytes.length;
+      const has2 = i + 2 < bytes.length;
+      const b1 = has1 ? bytes[i + 1] : 0;
+      const b2 = has2 ? bytes[i + 2] : 0;
+      const n = (b0 << 16) | (b1 << 8) | b2;
+      out += B64_ALPHABET[(n >> 18) & 0x3f];
+      out += B64_ALPHABET[(n >> 12) & 0x3f];
+      if (has1) out += B64_ALPHABET[(n >> 6) & 0x3f];
+      if (has2) out += B64_ALPHABET[n & 0x3f];
+    }
+    return out.replace(/\+/g, '-').replace(/\//g, '_');
+  }
+
+  function buildWidgetPairCode({ gistId, syncKey, token }) {
+    const payload = {
+      v: 1,
+      m: 'gist',
+      k: String(syncKey || '').trim(),
+      g: String(gistId || '').trim(),
+      t: String(token || '').trim(),
+    };
+    return 'QZ1:' + bytesToB64Url(utf8Encode(JSON.stringify(payload)));
+  }
+
   function utf8Decode(bytes) {
     let out = '';
     let i = 0;
@@ -395,12 +453,21 @@
     const cleanBase = String(appUrl || 'https://justambush.github.io/qingzhang-ledger/')
       .split('#')[0]
       .split('?')[0];
-    const tapUrl = cleanBase + '?action=add#add';
+    const cleanGist = String(gistId).trim();
+    const cleanKey = String(syncKey).trim();
+    const cleanToken = String(token).trim();
+    const pairCode = buildWidgetPairCode({
+      gistId: cleanGist,
+      syncKey: cleanKey,
+      token: cleanToken,
+    });
+    // Include auto-pair hash so tapping from Widget into Safari syncs with the exact same cloud Gist automatically
+    const tapUrl = cleanBase + '?action=add#pair=' + pairCode;
     const cfgJson = JSON.stringify(
       {
-        gistId: String(gistId).trim(),
-        syncKey: String(syncKey).trim(),
-        token: String(token).trim(),
+        gistId: cleanGist,
+        syncKey: cleanKey,
+        token: cleanToken,
         tapUrl,
       },
       null,
@@ -411,9 +478,12 @@
 // These must be at the very top of the file. Do not edit.
 // icon-color: orange; icon-glyph: wallet;
 // 轻账 QingZhang · iPhone 负一屏 (左滑) & 桌面实时记账小组件
-// 点击小组件将直接拉起轻账「记一笔」界面
+// 点击小组件将直接拉起轻账「记一笔」并自动与主屏幕 App 云端双向同步
 
 const CFG = ${cfgJson};
+// 可选：如果你在「快捷指令」新建了名为「轻账」(打开 App -> 轻账) 的指令，取消下一行注释即可直接跳转主屏幕桌面版
+// CFG.shortcutUrl = 'shortcuts://run-shortcut?name=%E8%BD%BB%E8%B4%A6';
+const WIDGET_TAP_URL = CFG.shortcutUrl || CFG.tapUrl;
 
 const B64_ALPHABET = ${JSON.stringify(B64_ALPHABET)};
 const B64_REV = (() => {
@@ -542,7 +612,7 @@ function fmtHHMM(ms) {
 function buildWidget(summary, meta) {
   const w = new ListWidget();
   w.backgroundColor = new Color('#FFFFFF');
-  w.url = CFG.tapUrl;
+  w.url = WIDGET_TAP_URL;
   w.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000);
 
   const isSmall = config.widgetFamily === 'small';
@@ -697,7 +767,7 @@ function buildWidget(summary, meta) {
   } catch (err) {
     const w = new ListWidget();
     w.backgroundColor = new Color('#FFFFFF');
-    w.url = CFG.tapUrl;
+    w.url = WIDGET_TAP_URL;
     w.setPadding(14, 14, 14, 14);
     const t = w.addText('📒 轻账小组件');
     t.font = Font.boldSystemFont(14);
@@ -716,6 +786,9 @@ function buildWidget(summary, meta) {
   const api = {
     b64ToBytes,
     b64UrlToBytes,
+    utf8Encode,
+    bytesToB64Url,
+    buildWidgetPairCode,
     utf8Decode,
     aes256GcmDecrypt,
     decryptVaultPureJs,

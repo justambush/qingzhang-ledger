@@ -1,16 +1,16 @@
-const CACHE_NAME = 'qingzhang-pwa-v7';
+const CACHE_NAME = 'qingzhang-pwa-v8';
 const ASSETS = [
   './',
   './index.html',
-  './styles.css',
+  './styles.css?v=8',
   './manifest.webmanifest',
-  './preload.js',
-  './js/store.js',
-  './js/crypto_sync.js',
-  './js/ios_widget.js',
-  './js/xlsx_lite.js',
-  './js/reconcile.js',
-  './js/app.js',
+  './preload.js?v=8',
+  './js/store.js?v=8',
+  './js/crypto_sync.js?v=8',
+  './js/ios_widget.js?v=8',
+  './js/xlsx_lite.js?v=8',
+  './js/reconcile.js?v=8',
+  './js/app.js?v=8',
   './icons/icon.svg',
   './icons/apple-touch-icon.png',
   './icons/pwa-192x192.png',
@@ -61,9 +61,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App shell assets: Stale-While-Revalidate for instant offline boot + silent updates
+  // Core app code/styles: Network-First so HTML/JS/CSS always upgrade atomically together
+  if (/\.(?:html|js|css|webmanifest)$/i.test(url.pathname)) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE_NAME).then((c) => c.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Icons and binary static assets: Stale-While-Revalidate
   event.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((cached) => {
+    caches.match(req).then((cached) => {
       const fetchPromise = fetch(req)
         .then((res) => {
           if (res && res.ok) {

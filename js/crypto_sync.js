@@ -283,16 +283,20 @@
   }
 
   async function syncViaSidecar(store) {
+    const seqBeforePush = store.writeSeq || 0;
+    const bodyStr = JSON.stringify({ snapshot: store.snapshot });
     const res = await window.sidecar.fetch('/api/ledger/sync', {
       method: 'POST',
-      body: JSON.stringify({ snapshot: store.snapshot }),
+      body: bodyStr,
     });
     if (!res.ok) throw new Error('Sidecar 同步失败: HTTP ' + res.status);
     const data = await res.json();
     if (data && data.snapshot) {
       await store.replaceFromMerge(data.snapshot);
     }
-    await store.setMeta('dirty', false);
+    if ((store.writeSeq || 0) === seqBeforePush) {
+      await store.setMeta('dirty', false);
+    }
     const ts = new Date().toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',
@@ -353,12 +357,20 @@
       return { ok: false, reason: 'not_configured' };
     }
 
+    const seqBeforeMerge = store.writeSeq || 0;
     const { snapshot, remoteNeedsPush } = await store.replaceFromMerge(remoteSnap);
     const shouldPush = remoteNeedsPush || !remoteHadData || Boolean(store.meta.dirty);
 
     if (shouldPush) {
       const envelope = await encryptSnapshot(snapshot, cfg.sync_key, 'ios-pwa');
       if (cfg.mode === 'gist') {
+        const bodyStr = JSON.stringify({
+          files: {
+            'qingzhang_vault.enc.json': {
+              content: JSON.stringify(envelope),
+            },
+          },
+        });
         const res = await fetch(
           'https://api.github.com/gists/' + encodeURIComponent(cfg.gist_id),
           {
@@ -368,29 +380,28 @@
               Accept: 'application/vnd.github+json',
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              files: {
-                'qingzhang_vault.enc.json': {
-                  content: JSON.stringify(envelope),
-                },
-              },
-            }),
+            body: bodyStr,
+            keepalive: bodyStr.length < 60000,
           }
         );
         if (!res.ok) throw new Error('上传加密账本失败 (HTTP ' + res.status + ')');
       } else if (cfg.mode === 'webhook') {
         const body = { ...envelope };
         if (cfg.relay_secret) body.secret = cfg.relay_secret;
+        const bodyStr = JSON.stringify(body);
         const res = await fetch(cfg.relay_url, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(body),
+          body: bodyStr,
+          keepalive: bodyStr.length < 60000,
         });
         if (!res.ok) throw new Error('上传 Relay 失败 (HTTP ' + res.status + ')');
       }
     }
 
-    await store.setMeta('dirty', false);
+    if ((store.writeSeq || 0) === seqBeforeMerge) {
+      await store.setMeta('dirty', false);
+    }
     const ts = new Date().toLocaleTimeString('zh-CN', {
       hour: '2-digit',
       minute: '2-digit',

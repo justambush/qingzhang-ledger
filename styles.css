@@ -314,6 +314,9 @@ select.compact-input {
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .chip.active {
@@ -529,6 +532,9 @@ select.compact-input {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .seg-btn.active {
@@ -589,6 +595,9 @@ select.compact-input {
   justify-content: center;
   gap: 6px;
   text-decoration: none;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .btn-primary {
@@ -754,6 +763,9 @@ select.compact-input {
   gap: 2px;
   padding: 4px 0;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .nav-item.active {
@@ -783,6 +795,9 @@ select.compact-input {
   display: flex;
   align-items: center;
   justify-content: center;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Bottom Sheet Modals (100% Opaque Surface + Frosted Scrim) */
@@ -883,6 +898,9 @@ select.compact-input {
   gap: 1px;
   cursor: pointer;
   color: var(--qz-ink);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .cat-btn.active {
@@ -900,18 +918,32 @@ select.compact-input {
   margin-bottom: 6px;
 }
 
-.subcat-hint {
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--qz-muted);
-  align-self: center;
-  padding-right: 2px;
+.entry-subcat-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.entry-subcat-wrap .chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  min-height: 28px;
+  line-height: 1.2;
 }
 
 .chip-dashed {
   border-style: dashed;
-  color: var(--qz-muted);
+  border-color: #94A3B8;
+  background-color: var(--qz-subtle);
+  color: var(--qz-ink-soft);
+}
+
+.chip-dashed.active {
+  background-color: var(--qz-brand-active);
+  border-color: var(--qz-brand);
+  color: var(--qz-brand-ink);
+  font-weight: 700;
 }
 
 .chip-del {
@@ -946,6 +978,9 @@ select.compact-input {
   gap: 4px;
   cursor: pointer;
   white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .meta-pill.active {
@@ -1051,6 +1086,9 @@ select.compact-input {
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .kp-btn:active { background-color: #E2E8F0; }

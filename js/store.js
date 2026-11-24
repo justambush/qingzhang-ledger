@@ -658,6 +658,7 @@
         })),
       };
       this.meta = { sync_config: null, last_sync_at: '', dirty: false };
+      this.writeSeq = 0;
     }
 
     async init() {
@@ -766,6 +767,9 @@
     }
 
     async setMeta(k, v) {
+      if (k === 'dirty' && v === true) {
+        this.writeSeq += 1;
+      }
       this.meta[k] = v;
       if (!this.db) return;
       await new Promise((resolve, reject) => {
