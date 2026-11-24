@@ -80,6 +80,28 @@ function doPost(e) {
 
   const $ = (id) => document.getElementById(id);
 
+  function syncModalBodyLock() {
+    const anyOpen = ['entry-modal', 'budget-modal', 'ios-guide-modal'].some(
+      (id) => {
+        const el = $(id);
+        return el && !el.classList.contains('hidden');
+      }
+    );
+    document.body.classList.toggle('modal-open', anyOpen);
+  }
+
+  function openModal(id) {
+    const el = $(id);
+    if (el) el.classList.remove('hidden');
+    syncModalBodyLock();
+  }
+
+  function closeModal(id) {
+    const el = $(id);
+    if (el) el.classList.add('hidden');
+    syncModalBodyLock();
+  }
+
   function esc(str) {
     return String(str ?? '')
       .replace(/&/g, '&amp;')
@@ -856,7 +878,7 @@ function doPost(e) {
       planPill.classList.remove('hidden');
     }
     renderEntrySheet();
-    $('entry-modal').classList.remove('hidden');
+    openModal('entry-modal');
   }
 
   function updatePlanPreview() {
@@ -1059,7 +1081,7 @@ function doPost(e) {
             inputAmount: amount,
           }
         );
-        $('entry-modal').classList.add('hidden');
+        closeModal('entry-modal');
         state.monthKey = occurredAt.slice(0, 7);
         renderAll();
         showToast(
@@ -1107,7 +1129,7 @@ function doPost(e) {
         });
       }
 
-      $('entry-modal').classList.add('hidden');
+      closeModal('entry-modal');
       state.monthKey = occurredAt.slice(0, 7);
       renderAll();
       showToast(state.entryEditingId ? '已更新记录' : '已记一笔');
@@ -1187,12 +1209,12 @@ function doPost(e) {
       if ($('chk-budget-default').checked) {
         await store.setBudget('default', total, catMap);
       }
-      $('budget-modal').classList.add('hidden');
+      closeModal('budget-modal');
       renderAll();
       showToast('预算已更新');
       runSync(true);
     };
-    $('budget-modal').classList.remove('hidden');
+    openModal('budget-modal');
   }
 
   // -------------------------------------------------------------------------
@@ -1554,7 +1576,7 @@ function doPost(e) {
         if (state.pendingPairCode) {
           $('btn-modal-copy-pair').classList.remove('hidden');
         }
-        $('ios-guide-modal').classList.remove('hidden');
+        openModal('ios-guide-modal');
       };
     } else {
       pwaCard.classList.add('hidden');
@@ -1595,7 +1617,7 @@ function doPost(e) {
           <button type="button" class="btn btn-primary btn-sm" id="btn-ask-jetski-analyze">💬 让 Jetski 分析本月账本</button>
           <a class="btn btn-ghost btn-sm" href="./pwa_dist.zip" download="qingzhang-pwa.zip">📦 下载 PWA 静态包</a>
         </div>
-        <details class="mt-10">
+        <details class="settings-details mt-10">
           <summary class="muted-sm" style="cursor:pointer;font-weight:600">🚀 一键发布到 GitHub Pages 并生成二维码</summary>
           <div class="mt-10">
             <input type="password" id="gh-token-input" class="compact-input" placeholder="GitHub Token (需 repo + gist 权限)" />
@@ -1603,7 +1625,7 @@ function doPost(e) {
             <button type="button" class="btn btn-primary btn-block mt-10" id="btn-gh-provision">一键部署 & 生成 iPhone 二维码</button>
           </div>
         </details>
-        <details class="mt-10">
+        <details class="settings-details mt-10">
           <summary class="muted-sm" style="cursor:pointer">备选：用个人 Gmail Apps Script 当云端中转（无需 GitHub Gist）</summary>
           <pre class="code-block mt-10">${esc(APPS_SCRIPT_SNIPPET)}</pre>
         </details>
@@ -1788,9 +1810,9 @@ function doPost(e) {
 
     // Quick Entry Modal
     $('btn-open-add').onclick = () => openEntryModal(null);
-    $('btn-close-entry').onclick = () => $('entry-modal').classList.add('hidden');
+    $('btn-close-entry').onclick = () => closeModal('entry-modal');
     $('entry-modal').onclick = (e) => {
-      if (e.target === $('entry-modal')) $('entry-modal').classList.add('hidden');
+      if (e.target === $('entry-modal')) closeModal('entry-modal');
     };
     $('entry-type-ctrl')
       .querySelectorAll('.seg-btn')
@@ -1857,7 +1879,7 @@ function doPost(e) {
     $('btn-entry-delete-group').onclick = async () => {
       if (!state.entryPlanId) return;
       const count = await store.deletePlanGroup(state.entryPlanId);
-      $('entry-modal').classList.add('hidden');
+      closeModal('entry-modal');
       renderAll();
       showToast(`已删除整组 ${count} 期记录`);
       runSync(true);
@@ -1875,7 +1897,7 @@ function doPost(e) {
     $('btn-entry-delete').onclick = async () => {
       if (!state.entryEditingId) return;
       await store.deleteTransaction(state.entryEditingId);
-      $('entry-modal').classList.add('hidden');
+      closeModal('entry-modal');
       renderAll();
       showToast('已删除记录');
       runSync(true);
@@ -1887,9 +1909,15 @@ function doPost(e) {
       });
 
     // Budget & Guide Modals
-    $('btn-close-budget').onclick = () => $('budget-modal').classList.add('hidden');
-    $('btn-close-ios-guide').onclick = () => $('ios-guide-modal').classList.add('hidden');
-    $('btn-dismiss-ios-guide').onclick = () => $('ios-guide-modal').classList.add('hidden');
+    $('btn-close-budget').onclick = () => closeModal('budget-modal');
+    $('budget-modal').onclick = (e) => {
+      if (e.target === $('budget-modal')) closeModal('budget-modal');
+    };
+    $('btn-close-ios-guide').onclick = () => closeModal('ios-guide-modal');
+    $('btn-dismiss-ios-guide').onclick = () => closeModal('ios-guide-modal');
+    $('ios-guide-modal').onclick = (e) => {
+      if (e.target === $('ios-guide-modal')) closeModal('ios-guide-modal');
+    };
     $('btn-modal-copy-pair').onclick = () =>
       copyText(state.pendingPairCode, '配对码已复制，请从主屏幕打开轻账后粘贴');
 
@@ -1990,11 +2018,7 @@ function doPost(e) {
         }
         if (typeof caches !== 'undefined') {
           const keys = await caches.keys();
-          await Promise.all(
-            keys
-              .filter((k) => k !== 'qingzhang-pwa-v4')
-              .map((k) => caches.delete(k))
-          );
+          await Promise.all(keys.map((k) => caches.delete(k)));
         }
       } catch (_) {}
       window.location.reload();

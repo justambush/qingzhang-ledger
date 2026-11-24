@@ -6,6 +6,7 @@
   <title>轻账 · 极简记账</title>
   <meta name="description" content="极简离线 iOS 记账 PWA，支持标签、月度分析预算、报销不入账与微信/支付宝/信用卡三单横向对账去重。" />
   <meta name="theme-color" content="#FFFFFF" />
+  <meta name="color-scheme" content="light" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -148,13 +149,13 @@
             <button type="button" class="btn btn-ghost" id="btn-edit-sync">手动配置</button>
             <button type="button" class="btn btn-ghost" id="btn-refresh-app">🔄 刷新版本</button>
           </div>
-          <div id="pair-input-box" class="hidden mt-10">
+          <div id="pair-input-box" class="sub-panel hidden mt-10">
             <div class="inline-form">
               <input type="text" id="input-pair-code" class="compact-input" placeholder="输入 16 位短配对码 (xxxx-xxxx-xxxx-xxxx)" autocapitalize="off" autocorrect="off" spellcheck="false" />
               <button type="button" class="btn btn-primary" id="btn-apply-pair">连接</button>
             </div>
           </div>
-          <div id="manual-sync-form" class="hidden mt-10"></div>
+          <div id="manual-sync-form" class="sub-panel hidden mt-10"></div>
         </div>
 
         <div class="card">
@@ -230,7 +231,7 @@
 
         <div class="entry-tags-row">
           <div class="chip-scroll" id="entry-tag-chips"></div>
-          <div class="inline-form mt-10 hidden" id="entry-new-tag-box">
+          <div class="sub-panel inline-form mt-10 hidden" id="entry-new-tag-box">
             <input type="text" id="entry-new-tag-input" class="compact-input" placeholder="输入标签名（如：出差）" maxlength="20" />
             <button type="button" class="btn btn-primary btn-sm" id="btn-confirm-new-tag">确定</button>
           </div>
