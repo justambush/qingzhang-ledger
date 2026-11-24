@@ -177,11 +177,12 @@
 
         <div class="card">
           <div class="card-head">
-            <h3>常用 #标签 管理</h3>
+            <h3>二级分类管理</h3>
           </div>
-          <div id="settings-tags-list" class="chip-wrap"></div>
+          <div id="settings-subcat-cats" class="chip-scroll"></div>
+          <div id="settings-tags-list" class="chip-wrap mt-10"></div>
           <div class="inline-form mt-10">
-            <input type="text" id="input-new-tag" class="compact-input" placeholder="新增常用标签（如：出差）" maxlength="20" />
+            <input type="text" id="input-new-tag" class="compact-input" placeholder="新增当前分类下的二级分类（如：补剂）" maxlength="20" />
             <button type="button" class="btn btn-primary" id="btn-add-setting-tag">添加</button>
           </div>
         </div>
@@ -240,7 +241,7 @@
         <div class="entry-meta-bar">
           <button type="button" class="meta-pill" id="btn-entry-reimb">
             <span>🧾</span>
-            <span id="reimb-pill-label">报销(不入账)</span>
+            <span id="reimb-pill-label">报销</span>
           </button>
           <button type="button" class="meta-pill" id="btn-entry-plan">
             <span>📅</span>
@@ -250,7 +251,6 @@
             <span>🕒</span>
             <input type="datetime-local" id="entry-time-input" class="time-native-input" />
           </label>
-          <input type="text" id="entry-note-input" class="note-input" placeholder="写点备注..." maxlength="80" />
         </div>
 
         <div class="plan-box hidden" id="entry-plan-edit-bar">
@@ -284,8 +284,11 @@
 
         <div class="keypad-wrap">
           <div class="amount-display">
-            <span class="amount-expr" id="calc-expr"></span>
-            <span class="amount-val" id="calc-display">¥0.00</span>
+            <input type="text" id="entry-note-input" class="display-note-input" placeholder="点此写备注..." maxlength="80" />
+            <div class="amount-right">
+              <span class="amount-expr" id="calc-expr"></span>
+              <span class="amount-val" id="calc-display">¥0.00</span>
+            </div>
           </div>
           <div class="keypad-grid" id="keypad-grid">
             <button type="button" class="kp-btn" data-kp="7">7</button>

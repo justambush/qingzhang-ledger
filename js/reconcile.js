@@ -176,6 +176,9 @@
     if (/苹果|icloud|app\s*store|数码|小米|华为|联想|电子/.test(text)) {
       return 'digital';
     }
+    if (/健身|keep|乐刻|超级猩猩|威尔仕|一兆韦德|游泳|羽毛球|网球|篮球|滑雪|瑜伽|普拉提|迪卡侬|decathlon|蛋白粉|肌酸|补剂|myprotein|运动/.test(text)) {
+      return 'sport';
+    }
     if (/红包|转账|礼金|送礼|请客/.test(text)) {
       return 'social';
     }

@@ -569,6 +569,13 @@ select.compact-input {
   border-radius: 999px;
 }
 
+.subcat-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
 /* Buttons */
 .btn {
   border: 1px solid transparent;
@@ -815,6 +822,20 @@ select.compact-input {
   margin: 0 auto 8px;
 }
 
+.entry-sheet {
+  padding: 6px 12px calc(8px + env(safe-area-inset-bottom));
+  max-height: 98dvh;
+}
+
+.entry-sheet::before {
+  margin: 0 auto 5px;
+}
+
+.entry-sheet .sheet-top {
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+}
+
 .dialog-sheet {
   padding: 10px 16px calc(16px + env(safe-area-inset-bottom));
 }
@@ -846,20 +867,20 @@ select.compact-input {
 
 .cat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 10px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  margin-bottom: 6px;
 }
 
 .cat-btn {
   border: 1px solid var(--qz-border);
   background-color: var(--qz-subtle);
-  border-radius: var(--qz-radius-md);
-  padding: 8px 4px;
+  border-radius: 10px;
+  padding: 5px 2px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
+  gap: 1px;
   cursor: pointer;
   color: var(--qz-ink);
 }
@@ -872,33 +893,59 @@ select.compact-input {
   box-shadow: 0 2px 6px rgba(245, 158, 11, 0.16);
 }
 
-.cat-btn .c-ico { font-size: 20px; }
-.cat-btn .c-txt { font-size: 12px; }
+.cat-btn .c-ico { font-size: clamp(16px, 2.3dvh, 20px); line-height: 1.1; }
+.cat-btn .c-txt { font-size: 11px; line-height: 1.15; white-space: nowrap; }
 
 .entry-tags-row {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+}
+
+.subcat-hint {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--qz-muted);
+  align-self: center;
+  padding-right: 2px;
+}
+
+.chip-dashed {
+  border-style: dashed;
+  color: var(--qz-muted);
+}
+
+.chip-del {
+  margin-left: 4px;
+  color: var(--qz-muted);
+  font-weight: 700;
 }
 
 .entry-meta-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 5px;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
+.entry-meta-bar::-webkit-scrollbar { display: none; }
+
 .meta-pill {
+  flex: 0 0 auto;
   border: 1px solid var(--qz-border-strong);
   background-color: var(--qz-subtle);
   color: var(--qz-ink);
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 4px 7px;
   font-size: 12px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .meta-pill.active {
@@ -909,9 +956,12 @@ select.compact-input {
 }
 
 .time-pill {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
   background-color: #FFFFFF;
   border-color: var(--qz-border-strong);
-  padding: 4px 8px;
+  padding: 3px 6px;
 }
 
 .time-native-input {
@@ -919,6 +969,7 @@ select.compact-input {
   background-color: transparent;
   padding: 0;
   width: auto;
+  max-width: 100%;
   font-size: 16px;
   color: var(--qz-ink);
   color-scheme: light;
@@ -934,18 +985,42 @@ select.compact-input {
   background-color: var(--qz-secondary);
   border: 1px solid var(--qz-border);
   border-radius: var(--qz-radius-md);
-  padding: 10px;
+  padding: 8px;
 }
 
 .amount-display {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+  gap: 8px;
   background-color: #FFFFFF;
   border: 1px solid var(--qz-border);
   border-radius: 10px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
+  padding: 5px 10px;
+  margin-bottom: 6px;
+}
+
+.display-note-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 16px;
+  color: var(--qz-ink);
+  padding: 2px 0;
+  color-scheme: light;
+}
+
+.display-note-input::placeholder {
+  color: #98A2B3;
+}
+
+.amount-right {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .amount-expr {
@@ -954,7 +1029,7 @@ select.compact-input {
 }
 
 .amount-val {
-  font-size: 24px;
+  font-size: clamp(20px, 2.8dvh, 24px);
   font-weight: 800;
   color: var(--qz-ink);
   font-variant-numeric: tabular-nums;
@@ -963,7 +1038,7 @@ select.compact-input {
 .keypad-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  gap: 5px;
 }
 
 .kp-btn {
@@ -971,8 +1046,8 @@ select.compact-input {
   background-color: var(--qz-surface);
   color: var(--qz-ink);
   border-radius: 10px;
-  height: 46px;
-  font-size: 18px;
+  height: clamp(38px, 5.2dvh, 45px);
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
@@ -1069,8 +1144,8 @@ select.compact-input {
   background-color: var(--qz-subtle);
   border: 1px solid var(--qz-border-strong);
   border-radius: var(--qz-radius-md);
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
 }
 
 .plan-box-head {

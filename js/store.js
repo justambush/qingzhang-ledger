@@ -11,13 +11,13 @@
       { key: 'transit', label: '交通', icon: '🚇' },
       { key: 'shop', label: '购物', icon: '🛍️' },
       { key: 'daily', label: '日用', icon: '🧴' },
+      { key: 'sport', label: '运动', icon: '🏃' },
       { key: 'home', label: '住房', icon: '🏠' },
       { key: 'fun', label: '娱乐', icon: '🎮' },
       { key: 'med', label: '医疗', icon: '💊' },
       { key: 'travel', label: '旅行', icon: '✈️' },
       { key: 'digital', label: '数码', icon: '📱' },
       { key: 'social', label: '人情', icon: '🤝' },
-      { key: 'study', label: '学习', icon: '📚' },
       { key: 'other_exp', label: '其他', icon: '📦' },
     ],
     income: [
@@ -34,6 +34,8 @@
     ],
   };
 
+  const LEGACY_CATEGORIES = [{ key: 'study', label: '学习', icon: '📚', group: 'expense' }];
+
   const CATEGORY_MAP = (() => {
     const m = {};
     for (const group of Object.keys(CATEGORIES)) {
@@ -41,10 +43,54 @@
         m[item.key] = { ...item, group };
       }
     }
+    for (const item of LEGACY_CATEGORIES) {
+      if (!m[item.key]) m[item.key] = { ...item };
+    }
     return m;
   })();
 
   const DEFAULT_TAGS = ['出差', '聚餐', '固定支出', '家人', '健身'];
+
+  const DEFAULT_CATEGORY_SUBTAGS = {
+    food: ['三餐', '咖啡奶茶', '聚餐', '外卖'],
+    transit: ['打车', '地铁公交', '高铁机票', '加油停车'],
+    shop: ['服饰鞋包', '网购', '美妆护肤', '礼物'],
+    daily: ['杂货', '买菜生鲜', '洗护清洁', '话费网费'],
+    sport: ['健身房', '补剂', '运动装备', '球类场地'],
+    home: ['房租', '水电燃气', '物业宽带', '家居维修'],
+    fun: ['电影演出', '游戏会员', '书影音', '休闲聚会'],
+    med: ['挂号门诊', '买药', '体检牙科', '保健品'],
+    travel: ['酒店住宿', '机票车票', '景点门票', '当地餐饮'],
+    digital: ['硬件设备', '软件订阅', '配件', '云服务'],
+    social: ['请客送礼', '红包礼金', '孝敬家人'],
+    other_exp: ['学习培训', '出差', '杂项'],
+    study: ['课程书籍', '考试认证'],
+    salary: ['月薪', '补贴'],
+    bonus: ['年终奖', '绩效奖'],
+    invest: ['基金股票', '利息分红'],
+    reimb_in: ['差旅报销', '日常报销'],
+    other_inc: ['红包退款', '闲置转卖'],
+    repay: ['信用卡还款', '花呗白条'],
+    reimb_adv: ['差旅垫付', '招待垫付'],
+    internal: ['卡间互转', '理财申赎'],
+  };
+
+  function parseScopedTagName(rawName) {
+    const s = String(rawName || '').trim();
+    const sepIdx = s.indexOf('::');
+    if (sepIdx > 0) {
+      return {
+        category: s.slice(0, sepIdx).trim(),
+        tag: s.slice(sepIdx + 2).trim().replace(/^#+/, '').slice(0, 24),
+        scoped: true,
+      };
+    }
+    return {
+      category: '',
+      tag: s.replace(/^#+/, '').slice(0, 24),
+      scoped: false,
+    };
+  }
 
   function pad2(n) {
     return String(n).padStart(2, '0');
@@ -421,6 +467,7 @@
     let personalIncome = 0;
     let excludedExpense = 0;
     const catTotals = {};
+    const catSubTotals = {};
     const tagTotals = {};
     const monthActive = [];
     const pendingReimbursements = [];
@@ -447,10 +494,13 @@
           dailySeries[dayIdx] += tx.amount;
         }
         catTotals[tx.category] = (catTotals[tx.category] || 0) + tx.amount;
+        if (!catSubTotals[tx.category]) catSubTotals[tx.category] = {};
         for (const tag of tx.tags || []) {
           if (!tagTotals[tag]) tagTotals[tag] = { tag, amount: 0, count: 0 };
           tagTotals[tag].amount += tx.amount;
           tagTotals[tag].count += 1;
+          catSubTotals[tx.category][tag] =
+            (catSubTotals[tx.category][tag] || 0) + tx.amount;
         }
       } else if (tx.type === 'income') {
         personalIncome += tx.amount;
@@ -475,13 +525,24 @@
       totalBudget > 0 ? Math.max(0, remainingBudget) / daysLeft : 0;
 
     const byCategory = Object.entries(catTotals)
-      .map(([key, amt]) => ({
-        key,
-        meta: CATEGORY_MAP[key] || { key, label: key, icon: '📦' },
-        amount: Math.round(amt * 100) / 100,
-        pct: personalExpense > 0 ? (amt / personalExpense) * 100 : 0,
-        budgetCap: Number(catBudgets[key]) || 0,
-      }))
+      .map(([key, amt]) => {
+        const subMap = catSubTotals[key] || {};
+        const subItems = Object.entries(subMap)
+          .map(([tag, subAmt]) => ({
+            tag,
+            amount: Math.round(subAmt * 100) / 100,
+            pctOfCat: amt > 0 ? (subAmt / amt) * 100 : 0,
+          }))
+          .sort((a, b) => b.amount - a.amount);
+        return {
+          key,
+          meta: CATEGORY_MAP[key] || { key, label: key, icon: '📦' },
+          amount: Math.round(amt * 100) / 100,
+          pct: personalExpense > 0 ? (amt / personalExpense) * 100 : 0,
+          budgetCap: Number(catBudgets[key]) || 0,
+          subItems,
+        };
+      })
       .sort((a, b) => b.amount - a.amount);
 
     const byTag = Object.values(tagTotals)
@@ -735,7 +796,7 @@
         a.occurred_at < b.occurred_at ? 1 : -1
       );
       for (const tg of normalized.tags) {
-        this._ensureTagInMemory(tg, now);
+        this._ensureTagInMemory(tg, now, normalized.category);
       }
       await this._persistSnapshot();
       await this.setMeta('dirty', true);
@@ -760,7 +821,7 @@
           this.snapshot.transactions.unshift(normalized);
         }
         for (const tg of normalized.tags) {
-          this._ensureTagInMemory(tg, now);
+          this._ensureTagInMemory(tg, now, normalized.category);
         }
       }
       this.snapshot.transactions.sort((a, b) =>
@@ -814,7 +875,15 @@
         });
       });
       if (patch.tags) {
-        for (const tg of patch.tags) this._ensureTagInMemory(tg, now);
+        let firstCategory = '';
+        for (const tx of this.snapshot.transactions) {
+          if (tx.plan_id === planId && (tx.deleted_at === null || tx.deleted_at === undefined)) {
+            firstCategory = tx.category;
+            break;
+          }
+        }
+        const catForTag = patch.category || firstCategory;
+        for (const tg of patch.tags) this._ensureTagInMemory(tg, now, catForTag);
       }
       if (count > 0) {
         await this._persistSnapshot();
@@ -884,9 +953,39 @@
       await this.setMeta('dirty', true);
     }
 
-    _ensureTagInMemory(name, ts = Date.now()) {
-      const clean = String(name).trim().replace(/^#+/, '').slice(0, 24);
+    _ensureTagInMemory(name, ts = Date.now(), categoryKey = '') {
+      const clean = String(name)
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/::/g, '·')
+        .slice(0, 24);
       if (!clean) return;
+      if (categoryKey) {
+        const scopedKey = `${categoryKey}::${clean}`;
+        const existingScoped = this.snapshot.custom_tags.findIndex(
+          (t) => t.name === scopedKey
+        );
+        if (existingScoped >= 0) {
+          if (this.snapshot.custom_tags[existingScoped].deleted_at !== null) {
+            this.snapshot.custom_tags[existingScoped] = {
+              name: scopedKey,
+              updated_at: ts,
+              deleted_at: null,
+            };
+          }
+          return;
+        }
+        if (this.getSubtagsForCategory(categoryKey).includes(clean)) {
+          return;
+        }
+        this.snapshot.custom_tags.push({
+          name: scopedKey,
+          updated_at: ts,
+          deleted_at: null,
+        });
+        return;
+      }
+
       const idx = this.snapshot.custom_tags.findIndex((t) => t.name === clean);
       if (idx >= 0) {
         if (this.snapshot.custom_tags[idx].deleted_at !== null) {
@@ -905,6 +1004,97 @@
       }
     }
 
+    getSubtagsForCategory(categoryKey) {
+      const defaults = DEFAULT_CATEGORY_SUBTAGS[categoryKey] || [];
+      const list = [...defaults];
+      for (const item of this.snapshot.custom_tags || []) {
+        if (!item || !item.name) continue;
+        const parsed = parseScopedTagName(item.name);
+        if (!parsed.tag) continue;
+        if (parsed.scoped) {
+          if (parsed.category !== categoryKey) continue;
+          if (item.deleted_at !== null && item.deleted_at !== undefined) {
+            const idx = list.indexOf(parsed.tag);
+            if (idx >= 0) list.splice(idx, 1);
+          } else if (!list.includes(parsed.tag)) {
+            list.push(parsed.tag);
+          }
+        } else if (
+          (item.deleted_at === null || item.deleted_at === undefined) &&
+          !DEFAULT_TAGS.includes(parsed.tag) &&
+          !list.includes(parsed.tag)
+        ) {
+          list.push(parsed.tag);
+        }
+      }
+      return list;
+    }
+
+    async addSubtag(categoryKey, rawTagName) {
+      const cat = String(categoryKey || '').trim();
+      const clean = String(rawTagName || '')
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/::/g, '·')
+        .slice(0, 24);
+      if (!cat || !clean) return;
+      const now = Date.now();
+      const scopedKey = `${cat}::${clean}`;
+      const idx = this.snapshot.custom_tags.findIndex((t) => t.name === scopedKey);
+      if (idx >= 0) {
+        this.snapshot.custom_tags[idx] = {
+          name: scopedKey,
+          updated_at: now,
+          deleted_at: null,
+        };
+      } else if (!(DEFAULT_CATEGORY_SUBTAGS[cat] || []).includes(clean)) {
+        this.snapshot.custom_tags.push({
+          name: scopedKey,
+          updated_at: now,
+          deleted_at: null,
+        });
+      }
+      await this._persistSnapshot();
+      await this.setMeta('dirty', true);
+    }
+
+    async removeSubtag(categoryKey, rawTagName) {
+      const cat = String(categoryKey || '').trim();
+      const clean = String(rawTagName || '')
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/::/g, '·')
+        .slice(0, 24);
+      if (!cat || !clean) return;
+      const now = Date.now();
+      const scopedKey = `${cat}::${clean}`;
+      const idx = this.snapshot.custom_tags.findIndex((t) => t.name === scopedKey);
+      if (idx >= 0) {
+        this.snapshot.custom_tags[idx] = {
+          name: scopedKey,
+          updated_at: now,
+          deleted_at: now,
+        };
+      } else {
+        this.snapshot.custom_tags.push({
+          name: scopedKey,
+          updated_at: now,
+          deleted_at: now,
+        });
+      }
+      // Also tombstone matching legacy unscoped entry so it does not linger in settings
+      const legIdx = this.snapshot.custom_tags.findIndex((t) => t.name === clean);
+      if (legIdx >= 0 && this.snapshot.custom_tags[legIdx].deleted_at === null) {
+        this.snapshot.custom_tags[legIdx] = {
+          name: clean,
+          updated_at: now,
+          deleted_at: now,
+        };
+      }
+      await this._persistSnapshot();
+      await this.setMeta('dirty', true);
+    }
+
     async addTag(name) {
       this._ensureTagInMemory(name, Date.now());
       await this._persistSnapshot();
@@ -912,9 +1102,13 @@
     }
 
     getActiveTags() {
-      return (this.snapshot.custom_tags || [])
-        .filter((t) => t.deleted_at === null || t.deleted_at === undefined)
-        .map((t) => t.name);
+      const out = [];
+      for (const t of this.snapshot.custom_tags || []) {
+        if (!t || (t.deleted_at !== null && t.deleted_at !== undefined)) continue;
+        const parsed = parseScopedTagName(t.name);
+        if (parsed.tag && !out.includes(parsed.tag)) out.push(parsed.tag);
+      }
+      return out;
     }
 
     async replaceFromMerge(remoteSnap) {
@@ -932,6 +1126,8 @@
     CATEGORIES,
     CATEGORY_MAP,
     DEFAULT_TAGS,
+    DEFAULT_CATEGORY_SUBTAGS,
+    parseScopedTagName,
     LedgerStore,
     mergeSnapshots,
     computeMonthStats,

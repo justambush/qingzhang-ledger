@@ -42,6 +42,7 @@
     reconResult: null,
 
     // Runtime env
+    settingsSubcatKey: 'sport',
     isSidecar: CryptoApi.isSidecarEnvironment(),
     sidecarSyncInfo: null,
     deferredInstallPrompt: null,
@@ -435,14 +436,12 @@ function doPost(e) {
       );
     }
     const usedTags = Array.from(
-      new Set(
-        stats.monthActive.flatMap((t) => t.tags || []).concat(store.getActiveTags())
-      )
+      new Set(stats.monthActive.flatMap((t) => t.tags || []))
     ).slice(0, 12);
     for (const tg of usedTags) {
       const act = state.filterTag === tg ? 'active' : '';
       chips.push(
-        `<button type="button" class="chip ${act}" data-filter-tag="${esc(tg)}">#${esc(tg)}</button>`
+        `<button type="button" class="chip ${act}" data-filter-tag="${esc(tg)}">${esc(tg)}</button>`
       );
     }
     chipsWrap.innerHTML = chips.join('');
@@ -475,6 +474,7 @@ function doPost(e) {
         tx.note,
         catLabel,
         tx.amount.toFixed(2),
+        ...(tx.tags || []),
         ...(tx.tags || []).map((t) => '#' + t),
       ]
         .join(' ')
@@ -528,7 +528,13 @@ function doPost(e) {
         const timeStr = tx.occurred_at.slice(11, 16);
         const amtPrefix =
           tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : '';
+        const primarySubtag =
+          tx.tags && tx.tags.length > 0 ? tx.tags[0] : '';
+        const titleText = primarySubtag
+          ? `${cat.label} · ${primarySubtag}`
+          : cat.label;
         const tagsHtml = (tx.tags || [])
+          .slice(1)
           .map((t) => `<span class="tag-badge">#${esc(t)}</span>`)
           .join('');
         let badgeHtml = '';
@@ -554,7 +560,7 @@ function doPost(e) {
             <div class="tx-ico">${esc(cat.icon)}</div>
             <div class="tx-main">
               <div class="tx-title-line">
-                <span>${esc(cat.label)}</span>
+                <span>${esc(titleText)}</span>
                 ${tx.note ? `<span class="tx-note">${esc(tx.note)}</span>` : ''}
               </div>
               <div class="tx-sub-line">
@@ -674,6 +680,15 @@ function doPost(e) {
               item.budgetCap > 0
                 ? `<span class="muted-sm"> / 限额 ${fmtMoney(item.budgetCap)}</span>`
                 : '';
+            const subHtml =
+              item.subItems && item.subItems.length > 0
+                ? `<div class="subcat-breakdown">${item.subItems
+                    .map(
+                      (s) =>
+                        `<span class="tag-badge">${esc(s.tag)} ${fmtMoney(s.amount)}</span>`
+                    )
+                    .join('')}</div>`
+                : '';
             return `
             <div class="rank-item">
               <div class="rank-top">
@@ -681,6 +696,7 @@ function doPost(e) {
                 <span>${fmtMoney(item.amount)}</span>
               </div>
               <div class="rank-track"><div class="rank-fill" style="width:${Math.min(100, item.pct).toFixed(1)}%"></div></div>
+              ${subHtml}
             </div>`;
           })
           .join('');
@@ -936,23 +952,39 @@ function doPost(e) {
       .querySelectorAll('.cat-btn')
       .forEach((btn) => {
         btn.onclick = () => {
-          state.entryCategory = btn.getAttribute('data-cat');
+          const nextCat = btn.getAttribute('data-cat');
+          if (!state.entryEditingId && nextCat !== state.entryCategory) {
+            const prevAllowed = store.getSubtagsForCategory(state.entryCategory);
+            const nextAllowed = store.getSubtagsForCategory(nextCat);
+            state.entryTags = state.entryTags.filter(
+              (t) => nextAllowed.includes(t) || !prevAllowed.includes(t)
+            );
+          }
+          state.entryCategory = nextCat;
           renderEntrySheet();
         };
       });
 
-    // Tags chips
+    // Level-2 subcategory tags scoped to selected primary category
+    const catMeta = StoreApi.CATEGORY_MAP[state.entryCategory] || { label: '' };
     const allTags = Array.from(
-      new Set([...store.getActiveTags(), ...state.entryTags])
+      new Set([
+        ...store.getSubtagsForCategory(state.entryCategory),
+        ...state.entryTags,
+      ])
     );
     $('entry-tag-chips').innerHTML =
+      '<span class="subcat-hint">二级</span>' +
       allTags
         .map(
           (tg) =>
-            `<button type="button" class="chip ${state.entryTags.includes(tg) ? 'active' : ''}" data-entry-tag="${esc(tg)}">#${esc(tg)}</button>`
+            `<button type="button" class="chip ${state.entryTags.includes(tg) ? 'active' : ''}" data-entry-tag="${esc(tg)}">${esc(tg)}</button>`
         )
         .join('') +
-      '<button type="button" class="chip" id="btn-entry-new-tag">+ 新标签</button>';
+      '<button type="button" class="chip chip-dashed" id="btn-entry-new-tag">＋ 二级</button>';
+    if ($('entry-new-tag-input')) {
+      $('entry-new-tag-input').placeholder = `添加「${catMeta.label}」二级分类...`;
+    }
 
     $('entry-tag-chips')
       .querySelectorAll('[data-entry-tag]')
@@ -980,7 +1012,7 @@ function doPost(e) {
     const reimbBtn = $('btn-entry-reimb');
     reimbBtn.classList.toggle('active', state.entryReimbursable);
     if (!state.entryReimbursable) {
-      $('reimb-pill-label').textContent = '报销(不入账)';
+      $('reimb-pill-label').textContent = '报销';
     } else if (state.entryReimburseStatus === 'done') {
       $('reimb-pill-label').textContent = '✓ 已报销(不入账)';
     } else {
@@ -1711,15 +1743,57 @@ function doPost(e) {
       }
     }
 
-    // 4. Ledger Count & Tags
+    // 4. Ledger Count & Category-Scoped Level-2 Subcategory Manager
     const activeCount = store.snapshot.transactions.filter(
       (t) => t.deleted_at === null || t.deleted_at === undefined
     ).length;
     $('ledger-count-label').textContent = `共 ${activeCount} 条有效记录`;
-    $('settings-tags-list').innerHTML = store
-      .getActiveTags()
-      .map((tg) => `<span class="chip">#${esc(tg)}</span>`)
+
+    const allCats = [
+      ...StoreApi.CATEGORIES.expense,
+      ...StoreApi.CATEGORIES.income,
+    ];
+    if (!allCats.some((c) => c.key === state.settingsSubcatKey)) {
+      state.settingsSubcatKey = allCats[0].key;
+    }
+    const selCatMeta = StoreApi.CATEGORY_MAP[state.settingsSubcatKey] || allCats[0];
+    $('settings-subcat-cats').innerHTML = allCats
+      .map(
+        (c) =>
+          `<button type="button" class="chip ${c.key === state.settingsSubcatKey ? 'active' : ''}" data-sc-cat="${esc(c.key)}">${esc(c.icon)} ${esc(c.label)}</button>`
+      )
       .join('');
+    $('settings-subcat-cats')
+      .querySelectorAll('[data-sc-cat]')
+      .forEach((btn) => {
+        btn.onclick = () => {
+          state.settingsSubcatKey = btn.getAttribute('data-sc-cat');
+          renderSettings();
+        };
+      });
+
+    const subtags = store.getSubtagsForCategory(state.settingsSubcatKey);
+    $('settings-tags-list').innerHTML =
+      subtags.length > 0
+        ? subtags
+            .map(
+              (tg) =>
+                `<button type="button" class="chip" data-del-subtag="${esc(tg)}">${esc(tg)} <span class="chip-del">×</span></button>`
+            )
+            .join('')
+        : `<span class="muted-sm">「${esc(selCatMeta.label)}」暂无二级分类，请在下方添加</span>`;
+    $('settings-tags-list')
+      .querySelectorAll('[data-del-subtag]')
+      .forEach((btn) => {
+        btn.onclick = async () => {
+          const tg = btn.getAttribute('data-del-subtag');
+          await store.removeSubtag(state.settingsSubcatKey, tg);
+          renderSettings();
+          showToast(`已移除「${tg}」`);
+          runSync(true);
+        };
+      });
+    $('input-new-tag').placeholder = `新增「${selCatMeta.label}」二级分类（如：${selCatMeta.key === 'sport' ? '私教' : selCatMeta.key === 'daily' ? '纸巾' : '自定义'}）`;
   }
 
   async function exportFile(filename, mimeType, contentStr) {
@@ -1885,13 +1959,23 @@ function doPost(e) {
       runSync(true);
     };
     $('btn-confirm-new-tag').onclick = async () => {
-      const val = $('entry-new-tag-input').value.trim().replace(/^#+/, '').slice(0, 20);
+      const val = $('entry-new-tag-input').value
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/::/g, '·')
+        .slice(0, 20);
       if (val) {
-        await store.addTag(val);
+        await store.addSubtag(state.entryCategory, val);
         if (!state.entryTags.includes(val)) state.entryTags.push(val);
       }
       $('entry-new-tag-box').classList.add('hidden');
       renderEntrySheet();
+    };
+    $('entry-new-tag-input').onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        $('btn-confirm-new-tag').click();
+      }
     };
     $('entry-new-tag-box').classList.add('hidden');
     $('btn-entry-delete').onclick = async () => {
@@ -2121,12 +2205,22 @@ function doPost(e) {
     };
 
     $('btn-add-setting-tag').onclick = async () => {
-      const val = $('input-new-tag').value.trim();
+      const val = $('input-new-tag').value
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/::/g, '·')
+        .slice(0, 20);
       if (!val) return;
-      await store.addTag(val);
+      await store.addSubtag(state.settingsSubcatKey, val);
       $('input-new-tag').value = '';
       renderSettings();
       runSync(true);
+    };
+    $('input-new-tag').onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        $('btn-add-setting-tag').click();
+      }
     };
 
     // PWA Install Events & Connectivity Listeners
